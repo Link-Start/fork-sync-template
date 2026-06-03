@@ -1,3 +1,5 @@
+
+
 # =============================================================================
 # GitHub Fork 自动同步工作流 - 动态发现版 (个人日常使用配置)
 # =============================================================================
@@ -64,6 +66,19 @@ on:
         options:
           - 'true'
           - 'false'
+      webhook_url:
+        description: '完成后通知的 webhook URL (留空 = 不通知;支持 Slack / 钉钉 / 通用,看 webhook_type)'
+        required: false
+        default: ''
+      webhook_type:
+        description: 'webhook 类型 (slack / dingtalk / generic)'
+        required: false
+        default: 'slack'
+        type: choice
+        options:
+          - slack
+          - dingtalk
+          - generic
 
 # 显式声明需要写权限
 permissions:
@@ -545,4 +560,59 @@ jobs:
                         -f body="$ISSUE_BODY" 2>/dev/null)
             NEW_NUM=$(echo "$NEW_ISSUE" | jq -r '.number // empty')
             echo "📝 新建 issue #$NEW_NUM"
+          fi
+
+      # =====================================================================
+      # Step 4: 发送 webhook 通知 (Slack / 钉钉 / 通用)
+      # 优先用 secrets.WEBHOOK_URL (推荐),其次 inputs.webhook_url
+      # webhook 失败不影响 workflow 整体结果
+      # =====================================================================
+      - name: Send webhook notification
+        if: always()
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL || inputs.webhook_url }}
+          WEBHOOK_TYPE: ${{ inputs.webhook_type }}
+          TOTAL: ${{ steps.post-issue-summary.outputs.total }}
+        run: |
+          set -e
+
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "⏭️  webhook_url 未配置,跳过通知"
+            exit 0
+          fi
+
+          # 复用 Step 3 的 summary 数据
+          SUMMARY_FILE="$RUNNER_TEMP/summary.jsonl"
+          if [ ! -f "$SUMMARY_FILE" ] || [ ! -s "$SUMMARY_FILE" ]; then
+            echo "⚠️ 没找到 summary.jsonl,跳过通知"
+            exit 0
+          fi
+
+          SUMMARY_JSON=$(jq -s '.' "$SUMMARY_FILE")
+          TOTAL=$(echo "$SUMMARY_JSON" | jq 'length')
+          TOTAL_NEW=$(echo "$SUMMARY_JSON" | jq '[.[].new] | add // 0')
+          TOTAL_SYNCED=$(echo "$SUMMARY_JSON" | jq '[.[].synced] | add // 0')
+          TOTAL_FAILED=$(echo "$SUMMARY_JSON" | jq '[.[].failed] | add // 0')
+          TOTAL_SKIPPED=$(echo "$SUMMARY_JSON" | jq '[.[].skipped] | add // 0')
+          TOTAL_BACKUP=$(echo "$SUMMARY_JSON" | jq '[.[].local_backup] | add // 0')
+          REPO_NAME="${{ github.event.repository.name }}"
+
+          # 用 jq 构造 payload (自动 escape 换行/特殊字符)
+          PAYLOAD=$(jq -n \
+            --arg total "$TOTAL" --arg new "$TOTAL_NEW" --arg synced "$TOTAL_SYNCED" \
+            --arg failed "$TOTAL_FAILED" --arg skipped "$TOTAL_SKIPPED" --arg backup "$TOTAL_BACKUP" \
+            --arg repo "$REPO_NAME" --arg url "https://github.com/${{ github.repository_owner }}/$REPO_NAME/issues" \
+            --arg type "$WEBHOOK_TYPE" '
+            "🤖 *Fork Sync 完成* [\($repo)]\n同步: \($total) 个 fork\n🆕 新建: \($new) | ✅ 同步: \($synced) | ❌ 失败: \($failed)\n⏭️ 跳过: \($skipped) | 📦 本地备份: \($backup)\n查看 issue: \($url)" as $msg
+            | if $type == "slack" then {text: $msg}
+              elif $type == "dingtalk" then {msgtype: "markdown", markdown: {title: "Fork Sync", text: $msg}}
+              else {message: $msg} end
+          ')
+
+          # POST 到 webhook (失败不中断 workflow)
+          if curl -sf -X POST -H "Content-Type: application/json" \
+                  -d "$PAYLOAD" "$WEBHOOK_URL" >/dev/null 2>&1; then
+            echo "✅ webhook 通知已发送 ($WEBHOOK_TYPE)"
+          else
+            echo "::warning::webhook 发送失败 ($WEBHOOK_TYPE),但不影响 workflow"
           fi
