@@ -92,7 +92,7 @@ jobs:
         run: |
           set -e
 
-          FORKS=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
+          FORKS=$(gh_api_with_retry 'user/repos?per_page=100&type=owner&sort=updated' \
                   --jq '[.[] | select(.fork == true and .parent != null) | {
                     name: .name,
                     parent_name: .parent.name,
@@ -144,6 +144,31 @@ jobs:
           LOG_DIR=$(mktemp -d)
           trap 'rm -rf "$LOG_DIR"' EXIT
 
+          # 重试包装:失败时 1s/2s/4s 指数退避,最多 3 次
+          # 适用于网络抖动 / 5xx / API 限流等临时错误
+          gh_api_with_retry() {
+            local max_attempts=3
+            local attempt=1
+            local delay=1
+            local output rc
+            while [ $attempt -le $max_attempts ]; do
+              if output=$(gh api "$@" 2>/dev/null); then
+                echo "$output"
+                return 0
+              fi
+              rc=$?
+              if [ $attempt -lt $max_attempts ]; then
+                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试" >&2
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+              attempt=$((attempt + 1))
+            done
+            echo "  ❌ gh api 最终失败 (3 次都失败)" >&2
+            return 1
+          }
+          export -f gh_api_with_retry
+
           # dry-run 包装:DRY_RUN=true 时只 echo 不真写
           # 适用于所有 gh api 写操作 (POST/PATCH/DELETE)
           gh_api_write() {
@@ -151,7 +176,7 @@ jobs:
               echo "[DRY-RUN] gh api $*"
               return 0
             fi
-            gh api "$@"
+            gh_api_with_retry "$@"
           }
           export -f gh_api_write
 
@@ -196,8 +221,8 @@ jobs:
               echo "⏭️  豁免 size 检查: $FORK_REPO 在 SIZE_CHECK_EXEMPT 白名单里"
               SKIP_SIZE_CHECK=true
             fi
-            FORK_SIZE=$(gh api "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
-            UPSTREAM_SIZE=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
+            FORK_SIZE=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
+            UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
                [ "$(awk "BEGIN {print ($UPSTREAM_SIZE < $FORK_SIZE * $SIZE_DROP_THRESHOLD) ? 1 : 0}")" = "1" ]; then
@@ -215,7 +240,7 @@ jobs:
 
             # ----- 阶段 2: 备份当前 fork 默认分支 -----
             local FORK_DEFAULT_SHA
-            FORK_DEFAULT_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
+            FORK_DEFAULT_SHA=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
                                --jq '.object.sha' 2>/dev/null || echo "")
             if [ -n "$FORK_DEFAULT_SHA" ]; then
               local BACKUP_TAG
@@ -231,14 +256,14 @@ jobs:
             local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=()
 
             local UPSTREAM_BRANCH_LIST
-            UPSTREAM_BRANCH_LIST=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
+            UPSTREAM_BRANCH_LIST=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
                                    --jq -r '.[] | .name')
 
             for branch in $UPSTREAM_BRANCH_LIST; do
               echo "  ━━━ $branch ━━━"
 
               local UPSTREAM_SHA FORK_SHA
-              UPSTREAM_SHA=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
+              UPSTREAM_SHA=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
                              --jq '.object.sha' 2>/dev/null || echo "")
               if [ -z "$UPSTREAM_SHA" ]; then
                 echo "    ❌ 拿不到 upstream SHA"
@@ -246,7 +271,7 @@ jobs:
                 continue
               fi
 
-              FORK_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$branch" \
+              FORK_SHA=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$branch" \
                          --jq '.object.sha' 2>/dev/null || echo "")
 
               if [ -z "$FORK_SHA" ]; then
@@ -264,7 +289,7 @@ jobs:
               fi
 
               local COMPARE_JSON STATUS AHEAD BEHIND
-              COMPARE_JSON=$(gh api "repos/$MY_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
+              COMPARE_JSON=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
                              --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}' \
                              2>/dev/null || echo '{"status":"error"}')
               STATUS=$(echo "$COMPARE_JSON" | jq -r '.status // "error"')
@@ -330,7 +355,7 @@ jobs:
             # ----- 阶段 4: 清理旧 backup tag -----
             local KEPT=20
             local TAGS
-            TAGS=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/refs/tags" \
+            TAGS=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/git/refs/tags" \
                    --jq -r '.[] | .ref' 2>/dev/null \
                    | sed 's|refs/tags/||' \
                    | grep '^backup/' || true)
@@ -394,13 +419,36 @@ jobs:
           # 找 Step 2 写的 summary.jsonl
           SUMMARY_FILE="$RUNNER_TEMP/summary.jsonl"
 
-          # dry-run 包装 (Step 2 已定义,Step 3 subshell 隔离,需重新定义)
+          # 重试包装 (Step 2 已定义,Step 3 subshell 隔离,需重新定义)
+          gh_api_with_retry() {
+            local max_attempts=3
+            local attempt=1
+            local delay=1
+            local output rc
+            while [ $attempt -le $max_attempts ]; do
+              if output=$(gh api "$@" 2>/dev/null); then
+                echo "$output"
+                return 0
+              fi
+              rc=$?
+              if [ $attempt -lt $max_attempts ]; then
+                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试" >&2
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+              attempt=$((attempt + 1))
+            done
+            echo "  ❌ gh api 最终失败 (3 次都失败)" >&2
+            return 1
+          }
+
+          # dry-run 包装
           gh_api_write() {
             if [ "${DRY_RUN:-false}" = "true" ]; then
               echo "[DRY-RUN] gh api $*"
               return 0
             fi
-            gh api "$@"
+            gh_api_with_retry "$@"
           }
 
           if [ ! -f "$SUMMARY_FILE" ] || [ ! -s "$SUMMARY_FILE" ]; then
@@ -429,7 +477,7 @@ jobs:
           ISSUE_BODY="${HEADER}${DETAIL_ROWS}"
 
           # 找已有 issue
-          EXISTING=$(gh api "repos/$MY_OWNER/${{ github.event.repository.name }}/issues?state=all&labels=&per_page=100" \
+          EXISTING=$(gh_api_with_retry "repos/$MY_OWNER/${{ github.event.repository.name }}/issues?state=all&labels=&per_page=100" \
                      --jq ".[] | select(.title == \"$ISSUE_TITLE\") | .number" 2>/dev/null | head -1 || echo "")
 
           if [ -n "$EXISTING" ]; then
