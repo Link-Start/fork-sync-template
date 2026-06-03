@@ -36,6 +36,10 @@ on:
         description: '指定要排除的 fork 名,逗号分隔 (留空 = 不排除指定 fork)'
         required: false
         default: ''
+      size_drop_threshold:
+        description: '上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,默认 0.10 = 10%)'
+        required: false
+        default: ''
 
 # 显式声明需要写权限
 permissions:
@@ -46,6 +50,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MY_OWNER: ${{ github.repository_owner }}
+      # 通用模板默认不设阈值,让 forker 手动触发时填
+      # 推荐 0.10 (敏感) 或 0.30 (宽松),0 = 关闭
+      DEFAULT_SIZE_DROP_THRESHOLD: '0.10'
     steps:
       # =====================================================================
       # Step 1: 发现 fork
@@ -56,6 +63,8 @@ jobs:
           FILTER: ${{ inputs.upstream_owner_filter }}
           # 手动指定要排除的 fork 名 (逗号分隔,精确匹配)
           EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
+          # 手动输入优先,否则用默认体积暴减阈值
+          SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.DEFAULT_SIZE_DROP_THRESHOLD }}
         run: |
           set -e
 
@@ -122,6 +131,24 @@ jobs:
             fi
             echo "🔍 上游默认分支: $UPSTREAM_DEFAULT"
 
+            # ----- 阶段 1.5: 危险检测 - 上游体积暴减 -----
+            # 场景: 上游把源码删了只留 README/说明文件,同步会把 fork 源码也删光
+            # 启发: GitHub repo .size 字段 (KB),当 fork 已有实质内容 (>= 50KB)
+            #       且 upstream 体积/fork 体积 < SIZE_DROP_THRESHOLD 时,跳过整个 fork
+            # SIZE_DROP_THRESHOLD 默认 0.10 (=10%,敏感);0.30 宽松;0 关闭
+            FORK_SIZE=$(gh api "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
+            UPSTREAM_SIZE=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
+            THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
+            if [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
+               [ "$(awk "BEGIN {print ($UPSTREAM_SIZE < $FORK_SIZE * $SIZE_DROP_THRESHOLD) ? 1 : 0}")" = "1" ]; then
+              RATIO=$(awk "BEGIN {printf \"%.1f\", $UPSTREAM_SIZE * 100 / $FORK_SIZE}")
+              echo "::error::🛑 危险: 上游体积暴减 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB, 上游只剩 fork 的 ${RATIO}%,阈值 ${THRESHOLD_PCT}%)"
+              echo "  疑似上游删除了源码,只留下 README/说明文件,跳过本次同步"
+              SKIPPED+=("$FORK_REPO")
+              continue
+            fi
+            echo "📏 体积检查通过: fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB (阈值 ${THRESHOLD_PCT}%)"
+
             # ----- 阶段 2: 备份当前 fork 默认分支 -----
             FORK_DEFAULT_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
                                --jq '.object.sha' 2>/dev/null || echo "")
@@ -138,6 +165,7 @@ jobs:
             SYNCED=()
             FAILED=()
             NEW=()
+            SKIPPED=()
 
             UPSTREAM_BRANCH_LIST=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
                                    --jq -r '.[] | .name')
@@ -232,7 +260,7 @@ jobs:
 
             # ----- 阶段 5: 单 fork 汇总 -----
             echo ""
-            echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]}"
+            echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]}"
           done
 
           echo ""

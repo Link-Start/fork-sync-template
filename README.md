@@ -118,7 +118,7 @@ fork-sync-template/
 | 2 | [docs/02-setup.md](docs/02-setup.md) | 一次性配置 4 步 + 触发机制 | **第一次部署必看** |
 | 3 | [docs/03-api-flow.md](docs/03-api-flow.md) | 4 个核心 API + 5 阶段执行流程 | 想理解技术细节 |
 | 4 | [docs/04-backup-faq.md](docs/04-backup-faq.md) | 备份与回退 + 15 个 FAQ | 出问题查表 |
-| 5 | [docs/05-scenarios.md](docs/05-scenarios.md) | 8 个典型场景处理 | 遇到具体场景查表 |
+| 5 | [docs/05-scenarios.md](docs/05-scenarios.md) | 10 个典型场景处理(新增上游删源码防护) | 遇到具体场景查表 |
 | 6 | [docs/06-multi-fork.md](docs/06-multi-fork.md) | 两种风格对比(动态发现 vs 静态 matrix) | 想理解两种风格的区别 |
 | 7 | [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md) | 怎么让某些 fork 不参与同步 | 有不想同步的 fork |
 | 8 | [docs/08-advanced.md](docs/08-advanced.md) | 网络重试、通知、reusable workflow | 想深度定制 |
@@ -142,6 +142,31 @@ fork-sync-template/
 - 三个组合填: `upstream_owner_filter=cv-cat` + `exclude_pattern=test` + `exclude_repos=legacy-thing` → 只同步 cv-cat 旗下、名字不含 test、且不是 legacy-thing 的 fork
 
 > 仓库自带的自动跳过(`.github/.no-sync` 文件)依然生效,跟上面三种独立。详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
+
+---
+
+## 🛑 上游删源码防护 (体积暴减检测)
+
+**最危险的场景:upstream 删了所有源码只留一个 README/说明文件,旧版会乖乖同步把 fork 源码也删光。**
+
+新版加了"体积暴减检测",sync 前会比对 fork 和 upstream 的 `size`:
+
+| 条件 | 行为 |
+|---|---|
+| fork < 50KB | 跳过检测 (避免误杀小项目) |
+| upstream 体积 < fork × `size_drop_threshold` | **跳过整个 fork**,打 `::error::` 红色警报 |
+| upstream 体积 ≥ fork × `size_drop_threshold` | 通过,正常 sync |
+
+**`size_drop_threshold` 可调** (默认 `0.10` = 10%):
+- `0.10` (默认) — 敏感,推荐大多数人
+- `0.30` — 宽松,大重构可能误判
+- `0` — 关闭检测 (不推荐)
+
+**手动触发**:
+- 填 `size_drop_threshold=0.05` → 5% 触发 (更敏感)
+- 留空 → 用默认 (yml 里的 `DEFAULT_SIZE_DROP_THRESHOLD`)
+
+**误报时怎么办**:临时把阈值改成 `0` 跑一次,或直接删 fork。详见 [docs/05-scenarios.md](docs/05-scenarios.md) 场景 10。
 
 ---
 

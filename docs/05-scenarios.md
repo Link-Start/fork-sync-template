@@ -49,3 +49,46 @@ fork 上**同时存在** dev 和 develop,dev 内容不变,develop 内容跟 upst
 ### 场景 9: 有个 fork 我不想自动同步
 
 看 [07-skip-mechanisms.md](07-skip-mechanisms.md)——per-fork `.no-sync` 或 config-repo `skip.txt`。
+
+### 场景 10: 上游把源码删了只留 README / 说明文件
+
+**这是最危险的情况。** 旧版 workflow 没有防护,会直接同步把 fork 的源码也删光。**新版加了"体积暴减检测"防护**:
+
+| 条件 | 行为 |
+|---|---|
+| fork 已有实质内容 (≥ 50KB) | 进入检测 |
+| upstream 体积 < fork × `SIZE_DROP_THRESHOLD` | **跳过整个 fork**,打 `::error::` 红色警报 |
+| upstream 体积 ≥ fork × `SIZE_DROP_THRESHOLD` | 通过,正常 sync |
+| fork 太小 (< 50KB,比如新 fork) | 跳过检测 (避免误杀小项目) |
+
+**阈值可调**(`size_drop_threshold` input 或 yml 里的 `DEFAULT_SIZE_DROP_THRESHOLD`):
+
+| 阈值 | 含义 | 误判风险 | 推荐场景 |
+|---|---|---|---|
+| `0.10` (默认) | 上游只剩 fork 的 10% 触发 | 低 | **大多数人,日常防护** |
+| `0.30` | 上游只剩 fork 的 30% 触发 | 中(大重构可能误判) | fork 经常做大手术的项目 |
+| `0` | 关闭检测 | 0(但失去防护) | 完全信任 upstream,关掉免打扰 |
+
+**示例输出** (默认 10% 阈值,删源码场景):
+```
+🛑 危险: 上游体积暴减 (fork=12450KB → upstream=2KB, 上游只剩 fork 的 0.0%,阈值 10%)
+   疑似上游删除了源码,只留下 README/说明文件,跳过本次同步
+📊 Spider_XHS_cv-cat: 🆕0 ✅0 ❌0 ⏭️1
+```
+
+**示例输出** (正常 sync 场景):
+```
+📏 体积检查通过: fork=12450KB, upstream=15000KB (阈值 10%)
+```
+
+**为什么用体积而不是 commit 数或文件数?**
+- commit 数 / 文件数变化大,正常重构就可能触发误判
+- GitHub repo `.size` 字段 (KB) 是综合指标,正常添加 100 个文件 vs 删 1000 个文件,体积变化明显不同
+- 50KB 起步阈值避开新 fork / 小项目
+- 10% 比例阈值避开大型重构
+
+**如果你确认 upstream 删源码是合法操作**(比如项目终止 + 公开声明),手动:
+1. 进 fork 的 Actions 跑一次本 workflow,**手动触发**,把 SKIPPED 处理掉
+2. 或者去 upstream 改回去(重新 push 源码)
+3. 或者直接删 fork
+4. **或者临时把阈值改成 0**(关闭检测),跑完再改回来
