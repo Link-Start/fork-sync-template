@@ -48,6 +48,7 @@ on:
 # 显式声明需要写权限
 permissions:
   contents: write
+  issues: write
 
 jobs:
   sync-all:
@@ -307,6 +308,20 @@ jobs:
             # ----- 阶段 5: 单 fork 汇总 -----
             echo ""
             echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]} 📦${#LOCAL_BACKED_UP[@]}"
+
+            # 写汇总到共享 jsonl 文件 (并发安全,每 fork 追加一行)
+            # 用 $RUNNER_TEMP 而非 $LOG_DIR,因为 LOG_DIR 会在 EXIT trap 里被删
+            # Step 3 会读这份文件聚合后发 issue
+            jq -n -c \
+              --arg name "$FORK_REPO" \
+              --argjson new "${#NEW[@]}" \
+              --argjson synced "${#SYNCED[@]}" \
+              --argjson failed "${#FAILED[@]}" \
+              --argjson skipped "${#SKIPPED[@]}" \
+              --argjson local_backup "${#LOCAL_BACKED_UP[@]}" \
+              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{name: $name, new: $new, synced: $synced, failed: $failed, skipped: $skipped, local_backup: $local_backup, ts: $ts}' \
+              >> "$RUNNER_TEMP/summary.jsonl"
           }
           export -f process_fork
           export MY_OWNER SIZE_DROP_THRESHOLD LOG_DIR
@@ -325,3 +340,58 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ 全部 fork 处理完毕 (并发 $MAX_PARALLEL)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # =====================================================================
+      # Step 3: 汇总到 issue (跑完自动开/更新一个固定 issue 贴汇总)
+      # =====================================================================
+      - name: Post issue summary
+        if: always()
+        run: |
+          set -e
+
+          # 找 Step 2 写的 summary.jsonl
+          SUMMARY_FILE="$RUNNER_TEMP/summary.jsonl"
+
+          if [ ! -f "$SUMMARY_FILE" ] || [ ! -s "$SUMMARY_FILE" ]; then
+            echo "⚠️ 没找到 summary.jsonl ($SUMMARY_FILE),跳过 issue 通知"
+            exit 0
+          fi
+
+          # 聚合统计
+          SUMMARY_JSON=$(jq -s '.' "$SUMMARY_FILE")
+          TOTAL=$(echo "$SUMMARY_JSON" | jq 'length')
+          TOTAL_NEW=$(echo "$SUMMARY_JSON" | jq '[.[].new] | add // 0')
+          TOTAL_SYNCED=$(echo "$SUMMARY_JSON" | jq '[.[].synced] | add // 0')
+          TOTAL_FAILED=$(echo "$SUMMARY_JSON" | jq '[.[].failed] | add // 0')
+          TOTAL_SKIPPED=$(echo "$SUMMARY_JSON" | jq '[.[].skipped] | add // 0')
+          TOTAL_BACKUP=$(echo "$SUMMARY_JSON" | jq '[.[].local_backup] | add // 0')
+          RUN_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # 拼 issue body (markdown)
+          # 一次性 printf 拼好,避开 $(...) 吞尾部 \n 和 YAML literal block 不支持多行字符串拼接
+          ISSUE_TITLE="🤖 Fork Sync Report"
+          HEADER=$(printf "## 同步汇总\n\n- **运行时间**: %s (UTC)\n- **同步 fork 数**: %s\n- 🆕 新建分支: **%s**\n- ✅ 已同步: **%s**\n- ❌ 失败: **%s**\n- ⏭️ 跳过: **%s**\n- 📦 本地修改备份: **%s**\n\n### 详情\n\n| Fork | 🆕 | ✅ | ❌ | ⏭️ | 📦 |\n|---|---|---|---|---|---|\n" \
+            "$RUN_TS" "$TOTAL" "$TOTAL_NEW" "$TOTAL_SYNCED" "$TOTAL_FAILED" "$TOTAL_SKIPPED" "$TOTAL_BACKUP")
+          # 每 fork 一行 (jq -r 输出多行,直接拼到 header 后面)
+          DETAIL_ROWS=$(echo "$SUMMARY_JSON" | jq -r '.[] | "| \(.name) | \(.new) | \(.synced) | \(.failed) | \(.skipped) | \(.local_backup) |"')
+          # 一次性合并 header + 表格行
+          ISSUE_BODY="${HEADER}${DETAIL_ROWS}"
+
+          # 找已有 issue
+          EXISTING=$(gh api "repos/$MY_OWNER/${{ github.event.repository.name }}/issues?state=all&labels=&per_page=100" \
+                     --jq ".[] | select(.title == \"$ISSUE_TITLE\") | .number" 2>/dev/null | head -1 || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            # 已有 → 更新
+            gh api -X PATCH "repos/$MY_OWNER/${{ github.event.repository.name }}/issues/$EXISTING" \
+              -f title="$ISSUE_TITLE" \
+              -f body="$ISSUE_BODY" >/dev/null
+            echo "📝 更新 issue #$EXISTING"
+          else
+            # 没有 → 新建
+            NEW_ISSUE=$(gh api -X POST "repos/$MY_OWNER/${{ github.event.repository.name }}/issues" \
+                        -f title="$ISSUE_TITLE" \
+                        -f body="$ISSUE_BODY" 2>/dev/null)
+            NEW_NUM=$(echo "$NEW_ISSUE" | jq -r '.number // empty')
+            echo "📝 新建 issue #$NEW_NUM"
+          fi
