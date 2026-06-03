@@ -170,6 +170,25 @@ fork-sync-template/
 
 ---
 
+## 🛡️ 本地修改自动备份 (local-backup 分支)
+
+**场景**:你在 fork 的某个分支(比如 `master`)直接改了东西,忘了建独立分支。下次 sync 会把你的本地 commit 覆盖掉。
+
+**新版防护**:在 PATCH --force 之前,workflow 自动把 fork 当前 SHA 存到:
+
+```
+local-backup/master-20260603-153045-a1b2c3d
+   └─固定前缀   └─原分支名 └─时间戳   └─原 SHA 前 7 位
+```
+
+- 仅在 `ahead` / `diverged` 且 `ahead_by > 0` 时创建
+- **不自动清理**(本地数据是你自己的,不像 backup tag 自动保留 20 个)
+- 找回方法:`git checkout local-backup/master-...` → 找 commit → cherry-pick 到新分支
+
+详见 [docs/04-backup-faq.md](docs/04-backup-faq.md) 的"本地修改自动备份"章节。
+
+---
+
 ## 安全性
 
 - workflow 用的是 **你 (fork 者) 自己的 GITHUB_TOKEN**,跑在你自己的 runner 上

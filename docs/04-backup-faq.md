@@ -13,6 +13,69 @@ backup/20260602-153045-abc1234
 
 ---
 
+## 🛡️ 本地修改自动备份(local-backup 分支)
+
+**场景**:你在 fork 上某个分支直接改了东西(比如 `master` 上有 1-2 个本地 commit),忘了建独立分支。下次 sync 时,workflow 会检测到 fork 比 upstream ahead/diverged,然后 PATCH --force 覆盖。
+
+**新版防护**:在 PATCH --force 之前,workflow 自动把 fork 当前 SHA 存到一个**备份分支**:
+
+```
+local-backup/master-20260603-153045-a1b2c3d
+   └─固定前缀   └─原分支名 └─时间戳   └─原 SHA 前 7 位
+```
+
+- 命名规则:`local-backup/{原分支名}-{YYYYMMDD-HHMMSS}-{原 SHA 7 位}`
+- 触发条件:分支 `compare.status` 是 `ahead` 或 `diverged`,且 `ahead_by > 0`
+- 创建时机:在 PATCH --force 之前
+- **不自动清理** — 本地修改是你的数据,不像 backup tag 那样只保留 20 个
+- 即使 sync 失败,备份分支已经创建了,数据已经安全
+
+### 怎么找回本地修改
+
+```bash
+# 1. 列出所有 local-backup 分支
+git branch -a | grep local-backup
+
+# 2. 切到一个具体的备份分支看
+git checkout local-backup/master-20260603-153045-a1b2c3d
+
+# 3. 找回你的 commit (看 git log)
+git log --oneline -10
+
+# 4. 把 commit 复制到新分支
+git checkout -b my-recovered-changes
+git cherry-pick <commit-sha>  # 挑你想要的 commit 过来
+```
+
+### 怎么清理 local-backup 分支
+
+- **GitHub 网页**:进 fork → branches → 找 `local-backup/` 开头的 → 一个个删
+- **命令行**:
+  ```bash
+  # 列出所有 local-backup 分支
+  git branch -r | grep 'origin/local-backup' | sed 's|origin/||' | xargs -I {} git push origin --delete {}
+  ```
+- **API** (用 gh cli 批量):
+  ```bash
+  gh api repos/<你的用户名>/<fork名>/git/refs/heads/local-backup \
+    --jq '.[] | .ref' | \
+    xargs -I {} gh api -X DELETE repos/<你的用户名>/<fork名>/git/{}
+  ```
+
+### 跟 backup tag 的区别
+
+| | `backup/*` tag | `local-backup/*` branch |
+|---|---|---|
+| 存什么 | fork **默认分支**同步前的 SHA | fork 任意**有 ahead commit** 的分支同步前的 SHA |
+| 数量限制 | 最多 20 个,自动删 | 无限制,需要手动清理 |
+| 触发 | 每次 sync 默认分支前都建 | 仅当 ahead/diverged 时建 |
+| 用途 | 整个 fork 回退 | 找回本地修改 |
+| 清理 | 自动 | 手动 |
+
+**两者不冲突,各管各的**。
+
+---
+
 ## 怎么用 backup tag 回退
 
 ### 场景 A: 回退 fork 的 master 到同步前(命令行)

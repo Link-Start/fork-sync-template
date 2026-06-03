@@ -192,6 +192,7 @@ jobs:
             FAILED=()
             NEW=()
             SKIPPED=()
+            LOCAL_BACKED_UP=()
 
             UPSTREAM_BRANCH_LIST=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
                                    --jq -r '.[] | .name')
@@ -234,6 +235,24 @@ jobs:
               STATUS=$(echo "$COMPARE_JSON" | jq -r '.status // "error"')
               AHEAD=$(echo "$COMPARE_JSON" | jq -r '.ahead // 0')
               BEHIND=$(echo "$COMPARE_JSON" | jq -r '.behind // 0')
+
+              # 3.4.0 本地修改自动备份
+              # 当 fork 有 ahead commit (本地修改过) 且即将被 PATCH --force 覆盖时,
+              # 先把 fork 当前 SHA 存到 local-backup/{branch}-{时间戳}-{sha7} 命名分支
+              # 用户即使不知道改了也能找回,本地 clone 也还在
+              if [ "$STATUS" = "ahead" ] || [ "$STATUS" = "diverged" ]; then
+                if [ "$AHEAD" -gt 0 ] && [ -n "$FORK_SHA" ]; then
+                  BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
+                  if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                       -f ref="refs/heads/$BACKUP_BRANCH" \
+                       -f sha="$FORK_SHA" >/dev/null 2>&1; then
+                    echo "    📦 本地修改备份: $BACKUP_BRANCH (含 $AHEAD 个 commit)"
+                    LOCAL_BACKED_UP+=("$branch:$BACKUP_BRANCH")
+                  else
+                    echo "    ⚠️ 备份分支创建失败,继续 sync (本地修改可能丢失)"
+                  fi
+                fi
+              fi
 
               case "$STATUS" in
                 identical)
@@ -290,7 +309,7 @@ jobs:
 
             # ----- 阶段 5: 单 fork 汇总 -----
             echo ""
-            echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]}"
+            echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]} 📦${#LOCAL_BACKED_UP[@]}"
           done
 
           echo ""

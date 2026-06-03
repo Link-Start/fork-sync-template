@@ -2,9 +2,12 @@
 
 ### 场景 1: 我误改了 fork 的 master
 
-- **会发生什么**:下次 sync 时,`compare` 返回 `ahead` 或 `diverged`,workflow 强制 PATCH 覆盖
-- **怎么找回**:看 backup tag,回退到对应 SHA(详见 [04-backup-faq.md](04-backup-faq.md))
+- **会发生什么**:下次 sync 时,`compare` 返回 `ahead` 或 `diverged`,workflow 在 PATCH --force 之前**自动**创建 `local-backup/master-{时间戳}-{sha7}` 分支保存你的本地 commit
+- **怎么找回**:
+  1. 简单:`git checkout local-backup/master-...-...` 看本地修改
+  2. 完整:看 [04-backup-faq.md](04-backup-faq.md) 的"本地修改自动备份"章节
 - **怎么避免**:在 fork 上改东西用新分支(比如 `my-fix`),不要改 master
+- **注意**:`local-backup/` 分支**不自动清理**,需要手动删(详见 [04-backup-faq.md](04-backup-faq.md))
 
 ### 场景 2: 我有个自己的分支不想被覆盖
 
