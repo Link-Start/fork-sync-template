@@ -56,6 +56,14 @@ on:
         description: '最大并发数 (默认 4,推荐 2-8,过高会触发 API 限流)'
         required: false
         default: ''
+      dry_run:
+        description: '干跑模式 (true = 只看不动,只打 log 不真写,默认 false)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 # 显式声明需要写权限
 permissions:
@@ -156,12 +164,24 @@ jobs:
           FORKS: ${{ steps.discover.outputs.forks }}
           MAX_PARALLEL: ${{ inputs.max_parallel || env.DEFAULT_MAX_PARALLEL }}
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.DEFAULT_SIZE_CHECK_EXEMPT }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -e
 
           # 每 fork 单独 log 文件,避免并发输出错乱
           LOG_DIR=$(mktemp -d)
           trap 'rm -rf "$LOG_DIR"' EXIT
+
+          # dry-run 包装:DRY_RUN=true 时只 echo 不真写
+          # 适用于所有 gh api 写操作 (POST/PATCH/DELETE)
+          gh_api_write() {
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "[DRY-RUN] gh api $*"
+              return 0
+            fi
+            gh api "$@"
+          }
+          export -f gh_api_write
 
           # 单 fork 处理函数 (被 xargs -P 并发调用)
           # 每个调用重定向输出到独立 log 文件,最后按原顺序拼接
@@ -229,7 +249,7 @@ jobs:
             if [ -n "$FORK_DEFAULT_SHA" ]; then
               local BACKUP_TAG
               BACKUP_TAG="backup/$(date +%Y%m%d-%H%M%S)-${FORK_DEFAULT_SHA:0:7}"
-              if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+              if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
                    -f ref="refs/tags/$BACKUP_TAG" \
                    -f sha="$FORK_DEFAULT_SHA" >/dev/null 2>&1; then
                 echo "💾 备份: $BACKUP_TAG → ${FORK_DEFAULT_SHA:0:7}"
@@ -259,7 +279,7 @@ jobs:
                          --jq '.object.sha' 2>/dev/null || echo "")
 
               if [ -z "$FORK_SHA" ]; then
-                if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
                      -f ref="refs/heads/$branch" \
                      -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
                   echo "    🆕 新建 → ${UPSTREAM_SHA:0:7}"
@@ -288,7 +308,7 @@ jobs:
                 if [ "$AHEAD" -gt 0 ] && [ -n "$FORK_SHA" ]; then
                   local BACKUP_BRANCH
                   BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
-                  if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                  if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
                        -f ref="refs/heads/$BACKUP_BRANCH" \
                        -f sha="$FORK_SHA" >/dev/null 2>&1; then
                     echo "    📦 本地修改备份: $BACKUP_BRANCH (含 $AHEAD 个 commit)"
@@ -304,12 +324,12 @@ jobs:
                   echo "    = 已同步 (${UPSTREAM_SHA:0:7})"
                   ;;
                 behind)
-                  if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
+                  if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
                        -f branch="$branch" >/dev/null 2>&1; then
                     echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
                     SYNCED+=("$branch")
                   else
-                    if gh api -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                    if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
                          -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
                       echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
                       SYNCED+=("$branch")
@@ -320,7 +340,7 @@ jobs:
                   fi
                   ;;
                 ahead|diverged)
-                  if gh api -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                  if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
                        -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
                     echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
                     SYNCED+=("$branch")
@@ -349,7 +369,7 @@ jobs:
               echo "  🗑️ 清理旧 backup tag ($TAG_COUNT → 保留 $KEPT)"
               echo "$TAGS" | tail -n +$((KEPT+1)) | while read -r tag; do
                 [ -z "$tag" ] && continue
-                gh api -X DELETE "repos/$MY_OWNER/$FORK_REPO/git/refs/tags/$tag" \
+                gh_api_write -X DELETE "repos/$MY_OWNER/$FORK_REPO/git/refs/tags/$tag" \
                   >/dev/null 2>&1 && echo "    - $tag"
               done
             fi
@@ -395,11 +415,22 @@ jobs:
       # =====================================================================
       - name: Post issue summary
         if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -e
 
           # 找 Step 2 写的 summary.jsonl
           SUMMARY_FILE="$RUNNER_TEMP/summary.jsonl"
+
+          # dry-run 包装 (Step 2 已定义,Step 3 subshell 隔离,需重新定义)
+          gh_api_write() {
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "[DRY-RUN] gh api $*"
+              return 0
+            fi
+            gh api "$@"
+          }
 
           if [ ! -f "$SUMMARY_FILE" ] || [ ! -s "$SUMMARY_FILE" ]; then
             echo "⚠️ 没找到 summary.jsonl ($SUMMARY_FILE),跳过 issue 通知"
@@ -430,13 +461,13 @@ jobs:
 
           if [ -n "$EXISTING" ]; then
             # 已有 → 更新
-            gh api -X PATCH "repos/$MY_OWNER/${{ github.event.repository.name }}/issues/$EXISTING" \
+            gh_api_write -X PATCH "repos/$MY_OWNER/${{ github.event.repository.name }}/issues/$EXISTING" \
               -f title="$ISSUE_TITLE" \
               -f body="$ISSUE_BODY" >/dev/null
             echo "📝 更新 issue #$EXISTING"
           else
             # 没有 → 新建
-            NEW_ISSUE=$(gh api -X POST "repos/$MY_OWNER/${{ github.event.repository.name }}/issues" \
+            NEW_ISSUE=$(gh_api_write -X POST "repos/$MY_OWNER/${{ github.event.repository.name }}/issues" \
                         -f title="$ISSUE_TITLE" \
                         -f body="$ISSUE_BODY" 2>/dev/null)
             NEW_NUM=$(echo "$NEW_ISSUE" | jq -r '.number // empty')
