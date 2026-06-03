@@ -420,6 +420,31 @@ jobs:
           export -f process_fork
           export MY_OWNER SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR
 
+          # API 限流检查:剩余配额 = 0 时睡到 reset
+          # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
+          check_rate_limit() {
+            local info
+            info=$(gh_api_with_retry "rate_limit" \
+              --jq '{remaining: .resources.core.remaining, reset: .resources.core.reset, limit: .resources.core.limit}' 2>/dev/null || echo '{}')
+            local remaining reset limit now wait
+            remaining=$(echo "$info" | jq -r '.remaining // 9999')
+            reset=$(echo "$info" | jq -r '.reset // 0')
+            limit=$(echo "$info" | jq -r '.limit // 5000')
+            echo "📊 rate limit: $remaining/$limit"
+            if [ "$remaining" -le 0 ] 2>/dev/null; then
+              now=$(date +%s)
+              wait=$((reset - now + 10))
+              if [ $wait -gt 0 ] && [ $wait -lt 3700 ]; then
+                local reset_human
+                reset_human=$(date -d "@$reset" '+%H:%M:%S' 2>/dev/null || date -r "$reset" '+%H:%M:%S')
+                echo "  ⏸️  限流,等待 ${wait}s (到 $reset_human UTC)"
+                sleep "$wait"
+                echo "  ✅ 等待完毕,继续"
+              fi
+            fi
+          }
+          check_rate_limit
+
           # 并发跑 (MAX_PARALLEL 个同时),xargs 会等所有完成
           echo "$FORKS" | jq -c '.[]' | xargs -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$@"' _ {}
 
