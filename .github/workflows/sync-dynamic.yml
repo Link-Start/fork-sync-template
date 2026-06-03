@@ -48,6 +48,10 @@ on:
         description: '上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,默认 0.10 = 10%)'
         required: false
         default: ''
+      max_parallel:
+        description: '最大并发数 (默认 4,推荐 2-8,过高会触发 API 限流)'
+        required: false
+        default: ''
 
 # 显式声明需要写权限
 permissions:
@@ -68,6 +72,9 @@ jobs:
       # 0.30 = 上游只剩 fork 的 30% 触发 (宽松,大重构可能误判)
       # 0    = 关闭体积检查 (不推荐,会失去上游删源码防护)
       DEFAULT_SIZE_DROP_THRESHOLD: '0.10'
+      # 日常使用配置: 最大并发 fork 数
+      # 4 推荐值(够快又不触发限流),8 激进,1 串行
+      DEFAULT_MAX_PARALLEL: '4'
     steps:
       # =====================================================================
       # Step 1: 发现 fork
@@ -131,19 +138,33 @@ jobs:
           echo "$FORKS" | jq -r '.[] | "  - \(.name) ← \(.parent_owner)/\(.parent_name)"'
 
       # =====================================================================
-      # Step 2: 逐个 fork 同步 (5 阶段执行流程)
+      # Step 2: 并发同步 fork (5 阶段执行流程,每 fork 一份 log)
       # =====================================================================
       - name: Sync each fork
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
+          MAX_PARALLEL: ${{ inputs.max_parallel || env.DEFAULT_MAX_PARALLEL }}
         run: |
           set -e
 
-          echo "$FORKS" | jq -c '.[]' | while read -r fork; do
-            FORK_REPO=$(echo "$fork" | jq -r '.name')
-            UPSTREAM_OWNER=$(echo "$fork" | jq -r '.parent_owner')
-            UPSTREAM_REPO=$(echo "$fork" | jq -r '.parent_name')
-            UPSTREAM_DEFAULT=$(echo "$fork" | jq -r '.parent_default_branch')
+          # 每 fork 单独 log 文件,避免并发输出错乱
+          LOG_DIR=$(mktemp -d)
+          trap 'rm -rf "$LOG_DIR"' EXIT
+
+          # 单 fork 处理函数 (被 xargs -P 并发调用)
+          # 每个调用重定向输出到独立 log 文件,最后按原顺序拼接
+          process_fork() {
+            local fork_json="$1"
+            local FORK_REPO UPSTREAM_OWNER UPSTREAM_REPO UPSTREAM_DEFAULT
+            local FORK_NAME
+            FORK_NAME=$(echo "$fork_json" | jq -r '.name')
+            local log_file="$LOG_DIR/${FORK_NAME}.log"
+            exec > "$log_file" 2>&1
+
+            FORK_REPO=$(echo "$fork_json" | jq -r '.name')
+            UPSTREAM_OWNER=$(echo "$fork_json" | jq -r '.parent_owner')
+            UPSTREAM_REPO=$(echo "$fork_json" | jq -r '.parent_name')
+            UPSTREAM_DEFAULT=$(echo "$fork_json" | jq -r '.parent_default_branch')
 
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -153,7 +174,7 @@ jobs:
             # ----- 阶段 1: 上游存活检查 -----
             if [ -z "$UPSTREAM_DEFAULT" ]; then
               echo "::warning::上游不可访问 (删除/archived/私有化/网络故障),跳过"
-              continue
+              return 0
             fi
             echo "🔍 上游默认分支: $UPSTREAM_DEFAULT"
 
@@ -162,23 +183,27 @@ jobs:
             # 启发: GitHub repo .size 字段 (KB),当 fork 已有实质内容 (>= 50KB)
             #       且 upstream 体积/fork 体积 < SIZE_DROP_THRESHOLD 时,跳过整个 fork
             # SIZE_DROP_THRESHOLD 默认 0.10 (=10%,敏感);0.30 宽松;0 关闭
+            local FORK_SIZE UPSTREAM_SIZE THRESHOLD_PCT
             FORK_SIZE=$(gh api "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
             UPSTREAM_SIZE=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
             if [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
                [ "$(awk "BEGIN {print ($UPSTREAM_SIZE < $FORK_SIZE * $SIZE_DROP_THRESHOLD) ? 1 : 0}")" = "1" ]; then
+              local RATIO
               RATIO=$(awk "BEGIN {printf \"%.1f\", $UPSTREAM_SIZE * 100 / $FORK_SIZE}")
               echo "::error::🛑 危险: 上游体积暴减 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB, 上游只剩 fork 的 ${RATIO}%,阈值 ${THRESHOLD_PCT}%)"
               echo "  疑似上游删除了源码,只留下 README/说明文件,跳过本次同步"
-              SKIPPED+=("$FORK_REPO")
-              continue
+              echo "SKIPPED_SUMMARY|$FORK_REPO|上游体积暴减" >> "$log_file.summary"
+              return 0
             fi
             echo "📏 体积检查通过: fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB (阈值 ${THRESHOLD_PCT}%)"
 
             # ----- 阶段 2: 备份当前 fork 默认分支 -----
+            local FORK_DEFAULT_SHA
             FORK_DEFAULT_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
                                --jq '.object.sha' 2>/dev/null || echo "")
             if [ -n "$FORK_DEFAULT_SHA" ]; then
+              local BACKUP_TAG
               BACKUP_TAG="backup/$(date +%Y%m%d-%H%M%S)-${FORK_DEFAULT_SHA:0:7}"
               if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
                    -f ref="refs/tags/$BACKUP_TAG" \
@@ -188,19 +213,16 @@ jobs:
             fi
 
             # ----- 阶段 3: 遍历 upstream 分支,逐个同步 -----
-            SYNCED=()
-            FAILED=()
-            NEW=()
-            SKIPPED=()
-            LOCAL_BACKED_UP=()
+            local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=()
 
+            local UPSTREAM_BRANCH_LIST
             UPSTREAM_BRANCH_LIST=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
                                    --jq -r '.[] | .name')
 
             for branch in $UPSTREAM_BRANCH_LIST; do
               echo "  ━━━ $branch ━━━"
 
-              # 3.1 拿 upstream SHA
+              local UPSTREAM_SHA FORK_SHA
               UPSTREAM_SHA=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
                              --jq '.object.sha' 2>/dev/null || echo "")
               if [ -z "$UPSTREAM_SHA" ]; then
@@ -209,11 +231,9 @@ jobs:
                 continue
               fi
 
-              # 3.2 拿 fork SHA (可能不存在)
               FORK_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$branch" \
                          --jq '.object.sha' 2>/dev/null || echo "")
 
-              # 3.3 fork 没有 → POST 新建
               if [ -z "$FORK_SHA" ]; then
                 if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
                      -f ref="refs/heads/$branch" \
@@ -228,7 +248,7 @@ jobs:
                 continue
               fi
 
-              # 3.4 compare 决策
+              local COMPARE_JSON STATUS AHEAD BEHIND
               COMPARE_JSON=$(gh api "repos/$MY_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
                              --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}' \
                              2>/dev/null || echo '{"status":"error"}')
@@ -242,6 +262,7 @@ jobs:
               # 用户即使不知道改了也能找回,本地 clone 也还在
               if [ "$STATUS" = "ahead" ] || [ "$STATUS" = "diverged" ]; then
                 if [ "$AHEAD" -gt 0 ] && [ -n "$FORK_SHA" ]; then
+                  local BACKUP_BRANCH
                   BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
                   if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
                        -f ref="refs/heads/$BACKUP_BRANCH" \
@@ -292,11 +313,13 @@ jobs:
             done
 
             # ----- 阶段 4: 清理旧 backup tag -----
-            KEPT=20
+            local KEPT=20
+            local TAGS
             TAGS=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/refs/tags" \
                    --jq -r '.[] | .ref' 2>/dev/null \
                    | sed 's|refs/tags/||' \
                    | grep '^backup/' || true)
+            local TAG_COUNT
             TAG_COUNT=$(echo "$TAGS" | grep -c . || echo 0)
             if [ "$TAG_COUNT" -gt "$KEPT" ]; then
               echo "  🗑️ 清理旧 backup tag ($TAG_COUNT → 保留 $KEPT)"
@@ -310,9 +333,21 @@ jobs:
             # ----- 阶段 5: 单 fork 汇总 -----
             echo ""
             echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]} 📦${#LOCAL_BACKED_UP[@]}"
+          }
+          export -f process_fork
+          export MY_OWNER SIZE_DROP_THRESHOLD LOG_DIR
+
+          # 并发跑 (MAX_PARALLEL 个同时),xargs 会等所有完成
+          echo "$FORKS" | jq -c '.[]' | xargs -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$@"' _ {}
+
+          # 按原始 fork 顺序输出所有 log
+          echo "$FORKS" | jq -r '.name' | while read -r name; do
+            if [ -f "$LOG_DIR/$name.log" ]; then
+              cat "$LOG_DIR/$name.log"
+            fi
           done
 
           echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ 全部 fork 处理完毕"
+          echo "✅ 全部 fork 处理完毕 (并发 $MAX_PARALLEL)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
