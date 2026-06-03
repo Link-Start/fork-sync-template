@@ -1,0 +1,35 @@
+# Fork Sync 配置文件
+#
+# 复制本文件为 .github/sync-config.yml 放在你这个 config 仓库根目录
+# 优先级: workflow input > sync-config.yml > yml 里的 env default
+#
+# 格式: 简单的 key: value (一行一个,值可用双引号/单引号/裸值)
+# 不支持嵌套 YAML,不支持 list (需要 list 的用逗号分隔)
+
+# 排除仓库名含这个 pattern 的 fork (大小写不敏感,匹配 fork 名称)
+# 留空 = 不排除
+exclude_pattern: "claude"
+
+# 精确排除的 fork 名,逗号分隔
+# 留空 = 不排除指定 fork
+exclude_repos: ""
+
+# 上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,跳过 fork)
+# 0.10 = 敏感 (推荐)  0.30 = 宽松  0 = 关闭
+size_drop_threshold: 0.10
+
+# 豁免 size 检查的 fork 名,逗号分隔 (适用于 1KB CLI 工具之类的小项目)
+size_check_exempt: ""
+
+# 最大并发 fork 数
+# 4 推荐值(够快又不触发限流),8 激进,1 串行
+max_parallel: 4
+
+# 同步模式
+# auto = 直接 force-patch (默认)
+# pr   = 落后时开 PR 让人审 (只对 behind 状态有效)
+sync_mode: auto
+
+# Webhook 类型: slack / dingtalk / generic
+# 留空 = 不通知; URL 配在 secrets.WEBHOOK_URL 更安全
+webhook_type: slack

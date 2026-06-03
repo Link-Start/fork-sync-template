@@ -129,20 +129,56 @@ jobs:
       # =====================================================================
       # Step 1: 发现 fork
       # =====================================================================
+      # =====================================================================
+      # Step 0: 读 .github/sync-config.yml (用户配置文件,优先级: input > config > default)
+      # 把 config 覆盖写到 $GITHUB_ENV,后续 step 用 env.CONFIG_X 引用
+      # 支持的 key: exclude_pattern / exclude_repos / size_drop_threshold /
+      #            size_check_exempt / max_parallel / sync_mode / webhook_type
+      # 格式: 简单的 key: value (不支持嵌套 YAML,值用引号包起来)
+      # =====================================================================
+      - name: Read sync config
+        id: read-config
+        env:
+          CONFIG_REPO: ${{ github.event.repository.name }}
+        run: |
+          set -e
+
+          CONFIG_YAML=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/.github/sync-config.yml" \
+                        --jq '.content // ""' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+
+          if [ -z "$CONFIG_YAML" ]; then
+            echo "📄 未找到 .github/sync-config.yml,用默认配置"
+            exit 0
+          fi
+
+          echo "📄 找到 .github/sync-config.yml,加载覆盖:"
+          for KEY in exclude_pattern exclude_repos size_drop_threshold size_check_exempt \
+                     max_parallel sync_mode webhook_type; do
+            VAL=$(echo "$CONFIG_YAML" | grep -E "^${KEY}:" | head -1 \
+                  | sed -E "s/^${KEY}:[[:space:]]*//" \
+                  | sed 's/^["'"'"']//;s/["'"'"']$//' || echo "")
+            if [ -n "$VAL" ]; then
+              echo "  ✓ $KEY = $VAL"
+              echo "CONFIG_${KEY^^}=${VAL}" >> "$GITHUB_ENV"
+            fi
+          done
+
       - name: Discover forks
         id: discover
         env:
           FILTER: ${{ inputs.upstream_owner_filter }}
-          # 手动输入优先,否则用默认排除 pattern
-          EXCLUDE_PATTERN: ${{ inputs.exclude_pattern || env.DEFAULT_EXCLUDE_PATTERN }}
-          # 手动指定要排除的 fork 名 (逗号分隔,精确匹配)
-          EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
+          # 三段 fallback: input > config file > env default
+          EXCLUDE_PATTERN: ${{ inputs.exclude_pattern || env.CONFIG_EXCLUDE_PATTERN || env.DEFAULT_EXCLUDE_PATTERN }}
+          # 手动指定要排除的 fork 名 (逗号分隔,精确匹配);config 可覆盖
+          EXCLUDE_REPOS: ${{ inputs.exclude_repos || env.CONFIG_EXCLUDE_REPOS }}
           # 手动输入优先,否则用默认体积暴减阈值
-          SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.DEFAULT_SIZE_DROP_THRESHOLD }}
+          SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.CONFIG_SIZE_DROP_THRESHOLD || env.DEFAULT_SIZE_DROP_THRESHOLD }}
           # 手动输入优先,否则用默认 size 豁免名单
-          SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.DEFAULT_SIZE_CHECK_EXEMPT }}
+          SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}
           # 手动触发的 cron (只 log,不影响自动 schedule)
           CRON_SCHEDULE: ${{ inputs.cron_schedule }}
+          # 当前仓库名 (用于读 .github/sync-config.yml)
+          CONFIG_REPO: ${{ github.event.repository.name }}
         run: |
           set -e
 
@@ -202,10 +238,10 @@ jobs:
       - name: Sync each fork
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
-          MAX_PARALLEL: ${{ inputs.max_parallel || env.DEFAULT_MAX_PARALLEL }}
-          SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.DEFAULT_SIZE_CHECK_EXEMPT }}
+          MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
+          SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}
           DRY_RUN: ${{ inputs.dry_run }}
-          SYNC_MODE: ${{ inputs.sync_mode }}
+          SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
         run: |
           set -e
 
@@ -621,7 +657,7 @@ jobs:
         if: always()
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL || inputs.webhook_url }}
-          WEBHOOK_TYPE: ${{ inputs.webhook_type }}
+          WEBHOOK_TYPE: ${{ inputs.webhook_type || env.CONFIG_WEBHOOK_TYPE || 'slack' }}
           TOTAL: ${{ steps.post-issue-summary.outputs.total }}
         run: |
           set -e
