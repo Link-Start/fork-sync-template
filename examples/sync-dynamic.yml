@@ -40,6 +40,10 @@ on:
         description: '上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,默认 0.10 = 10%)'
         required: false
         default: ''
+      size_check_exempt:
+        description: '豁免 size 检查的 fork 名,逗号分隔 (留空 = 不豁免任何 fork,适用于 1KB CLI 工具之类的小项目)'
+        required: false
+        default: ''
       max_parallel:
         description: '最大并发数 (默认 4,推荐 2-8,过高会触发 API 限流)'
         required: false
@@ -60,6 +64,9 @@ jobs:
       DEFAULT_SIZE_DROP_THRESHOLD: '0.10'
       # 通用模板默认并发数,forker 可调
       DEFAULT_MAX_PARALLEL: '4'
+      # 通用模板默认不豁免 size 检查,让 forker 手动触发时填
+      # 推荐 1KB CLI 工具之类的小项目加这里
+      DEFAULT_SIZE_CHECK_EXEMPT: ''
     steps:
       # =====================================================================
       # Step 1: 发现 fork
@@ -120,6 +127,7 @@ jobs:
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
           MAX_PARALLEL: ${{ inputs.max_parallel || env.DEFAULT_MAX_PARALLEL }}
+          SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.DEFAULT_SIZE_CHECK_EXEMPT }}
         run: |
           set -e
 
@@ -159,11 +167,19 @@ jobs:
             # 启发: GitHub repo .size 字段 (KB),当 fork 已有实质内容 (>= 50KB)
             #       且 upstream 体积/fork 体积 < SIZE_DROP_THRESHOLD 时,跳过整个 fork
             # SIZE_DROP_THRESHOLD 默认 0.10 (=10%,敏感);0.30 宽松;0 关闭
-            local FORK_SIZE UPSTREAM_SIZE THRESHOLD_PCT
+            # SIZE_CHECK_EXEMPT: 逗号分隔的 fork 名白名单,这些 fork 跳过 size 检查
+            #                    适用于极小项目 (1KB CLI 工具) 被误杀的情况
+            local FORK_SIZE UPSTREAM_SIZE THRESHOLD_PCT SKIP_SIZE_CHECK=false
+            # 检查豁免名单 (精确匹配,逗号分隔)
+            if [ -n "$SIZE_CHECK_EXEMPT" ] && \
+               printf '%s' "$SIZE_CHECK_EXEMPT" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -Fxq "$FORK_REPO"; then
+              echo "⏭️  豁免 size 检查: $FORK_REPO 在 SIZE_CHECK_EXEMPT 白名单里"
+              SKIP_SIZE_CHECK=true
+            fi
             FORK_SIZE=$(gh api "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
             UPSTREAM_SIZE=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
-            if [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
+            if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
                [ "$(awk "BEGIN {print ($UPSTREAM_SIZE < $FORK_SIZE * $SIZE_DROP_THRESHOLD) ? 1 : 0}")" = "1" ]; then
               local RATIO
               RATIO=$(awk "BEGIN {printf \"%.1f\", $UPSTREAM_SIZE * 100 / $FORK_SIZE}")
@@ -171,7 +187,11 @@ jobs:
               echo "  疑似上游删除了源码,只留下 README/说明文件,跳过本次同步"
               return 0
             fi
-            echo "📏 体积检查通过: fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB (阈值 ${THRESHOLD_PCT}%)"
+            if [ "$SKIP_SIZE_CHECK" = "true" ]; then
+              echo "📏 体积检查跳过 (豁免): fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB"
+            else
+              echo "📏 体积检查通过: fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB (阈值 ${THRESHOLD_PCT}%)"
+            fi
 
             # ----- 阶段 2: 备份当前 fork 默认分支 -----
             local FORK_DEFAULT_SHA
@@ -324,7 +344,7 @@ jobs:
               >> "$RUNNER_TEMP/summary.jsonl"
           }
           export -f process_fork
-          export MY_OWNER SIZE_DROP_THRESHOLD LOG_DIR
+          export MY_OWNER SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR
 
           # 并发跑 (MAX_PARALLEL 个同时),xargs 会等所有完成
           echo "$FORKS" | jq -c '.[]' | xargs -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$@"' _ {}
