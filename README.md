@@ -1,0 +1,158 @@
+# Fork Sync Template
+
+> 一套用于自动把 fork 仓库同步到上游 (upstream) 的 GitHub Actions 模板
+> **纯 API 实现 · 无需 checkout / push · 几秒跑完 · 自动备份 · 零配置通用**
+
+---
+
+## 这是什么
+
+一个**可直接 fork 使用的 GitHub 模板仓库**。本仓库的 `.github/workflows/sync-dynamic.yml` 是作者日常使用配置(自动排除 claude 相关库);`examples/` 下放两种风格的**通用模板**(不放在 `.github/workflows/` 里所以不会被自动跑,fork 者可按需启用)。
+
+**核心特性**:
+- ✅ 纯 GitHub REST API,不 checkout 代码、不 push
+- ✅ 动态发现模式,自动列出你名下所有 fork
+- ✅ 支持名称/owner 模式排除(自动跳过指定 fork)
+- ✅ 自动检测 fork 的"超前/落后"状态
+- ✅ 支持所有分支同步 (不只默认分支)
+- ✅ 自动 backup tag (最多保留 20 个)
+- ✅ master / main 双默认分支兼容
+- ✅ 上游删库 / archived 友好 skip
+- ✅ 新分支自动拉,旧分支自动保
+- ✅ 跳过机制灵活 (per-fork `.no-sync` 或 config-repo `skip.txt`)
+
+---
+
+## 文件结构
+
+```
+fork-sync-template/
+├── .github/
+│   └── workflows/
+│       └── sync-dynamic.yml          # ✅ 作者日常使用配置 (默认排除 claude 相关 fork)
+├── examples/                          # 两种风格的通用模板 (fork 后不会被自动跑)
+│   ├── sync-dynamic.yml              # 通用动态发现 (排除 pattern 为空,同步所有 fork)
+│   └── sync-static.yml               # 通用静态 matrix (需要手写 fork 列表)
+├── docs/                              # 9 个独立文档
+│   ├── 01-architecture.md
+│   ├── 02-setup.md
+│   ├── 03-api-flow.md
+│   ├── 04-backup-faq.md
+│   ├── 05-scenarios.md
+│   ├── 06-multi-fork.md
+│   ├── 07-skip-mechanisms.md
+│   ├── 08-advanced.md
+│   └── 09-template-distribution.md
+├── README.md                          # 本文件
+└── .gitignore
+```
+
+---
+
+## 怎么用
+
+### 方式 1: 直接用默认配置 (排除 claude 相关)
+
+最简单,Fork 就能用:
+
+1. **Fork 这个仓库** (点页面右上角的 Fork 按钮)
+2. **开 workflow 写权限**: 进你 fork 后的仓库 → Settings → Actions → General → Workflow permissions → 选 **Read and write permissions** → Save
+3. **开定时任务**: 进 Actions 标签页 → 看到黄色提示 "Workflows aren't being run on this forked repository" → 点 **"I understand my workflows, go ahead and enable them"**
+4. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
+
+**想改排除的关键词?** 编辑 `.github/workflows/sync-dynamic.yml` 里的 `DEFAULT_EXCLUDE_PATTERN: 'claude'`,改其他词或留空。
+
+### 方式 2: 用通用动态模板 (不过滤任何 fork)
+
+如果默认的"排除 claude"不符合你的需要:
+
+1. **Fork 这个仓库**
+2. **用 `examples/sync-dynamic.yml` 替换默认 yml**:
+   - 进 `.github/workflows/`,删掉 `sync-dynamic.yml`
+   - 把 `examples/sync-dynamic.yml` 复制/移动到 `.github/workflows/sync-dynamic.yml`
+3. **开写权限 + 开定时任务** (跟方式 1 的 2/3 步一样)
+4. 完事。yml 会同步你名下**所有** fork (无排除)。
+
+### 方式 3: 用静态 matrix (精确控制同步列表)
+
+如果你的 fork 列表固定,想硬编码:
+
+1. **Fork 这个仓库**
+2. **编辑 `examples/sync-static.yml`**: 把 `matrix.fork:` 列表改成你自己的 fork
+3. **把改好的文件移动到 `.github/workflows/sync-static.yml`** (在 .github/workflows/ 下点 Add file → Create new file,内容粘贴)
+4. **删掉 `.github/workflows/sync-dynamic.yml`** (避免重复)
+5. **开写权限 + 开定时任务**
+
+### 跳过某些特定 fork (细粒度跳过)
+
+不管用哪个方式,都可以:
+- 在那个 fork 自己的仓库加 `.github/.no-sync` 文件,内容随便写 (推荐)
+- 在这个配置仓库根目录加 `skip.txt`,每行一个 fork 名
+
+详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
+
+---
+
+## 两种风格的差异 (动态 vs 静态)
+
+| 维度 | 动态发现 (sync-dynamic) | 静态 matrix (sync-static) |
+|---|---|---|
+| yml 复杂度 | 中等 (有循环逻辑) | 简单 (几行 matrix) |
+| **fork 者要不要改 yml** | 不用 (改 env 即可) | ✅ 要 (改 matrix 列表) |
+| 新增 fork | 自动包含 | 手动加 matrix 项 |
+| 删除 fork | 自动跳过 | 手动删 matrix 项 |
+| 排除某些 fork | 改 EXCLUDE_PATTERN 即可 | 在 matrix 删对应行 |
+| 适合谁 | 想要零配置 / fork 列表会变 | fork 数量固定 / 想精确控制 |
+
+详细对比见 [docs/06-multi-fork.md](docs/06-multi-fork.md)。
+
+---
+
+## 📚 详细文档
+
+按主题拆成 9 个独立文档,按需阅读:
+
+| # | 文档 | 内容 | 何时读 |
+|---|---|---|---|
+| 1 | [docs/01-architecture.md](docs/01-architecture.md) | 为什么用独立配置仓库(鸡生蛋问题) | 想理解架构设计 |
+| 2 | [docs/02-setup.md](docs/02-setup.md) | 一次性配置 4 步 + 触发机制 | **第一次部署必看** |
+| 3 | [docs/03-api-flow.md](docs/03-api-flow.md) | 4 个核心 API + 5 阶段执行流程 | 想理解技术细节 |
+| 4 | [docs/04-backup-faq.md](docs/04-backup-faq.md) | 备份与回退 + 15 个 FAQ | 出问题查表 |
+| 5 | [docs/05-scenarios.md](docs/05-scenarios.md) | 8 个典型场景处理 | 遇到具体场景查表 |
+| 6 | [docs/06-multi-fork.md](docs/06-multi-fork.md) | 两种风格对比(动态发现 vs 静态 matrix) | 想理解两种风格的区别 |
+| 7 | [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md) | 怎么让某些 fork 不参与同步 | 有不想同步的 fork |
+| 8 | [docs/08-advanced.md](docs/08-advanced.md) | 网络重试、通知、reusable workflow | 想深度定制 |
+| 9 | [docs/09-template-distribution.md](docs/09-template-distribution.md) | 模板分发的设计思路 | 想理解这个模板为什么这么设计 |
+
+---
+
+## 三种排除方式 (按粒度从粗到细)
+
+动态版 yml 支持 **3 种排除方式**,手动触发时可以组合使用:
+
+| 方式 | 怎么用 | 匹配什么 | 适合 |
+|---|---|---|---|
+| `exclude_pattern` (关键字) | 填 `claude` | fork **仓库名**包含关键字 (大小写不敏感) | 一次性排除一类 (如所有 anthropic/claude 库) |
+| `exclude_repos` (指定名) | 填 `my-test,legacy-fork` | fork **仓库名**精确匹配列表中的任一 | 排除几个特定的 |
+| `upstream_owner_filter` (正向) | 填 `cv-cat` | 只保留**上游 owner** 是这个的 fork | 只想同步某个作者旗下的 fork |
+
+**示例** (手动触发时):
+- `exclude_pattern=claude` → 跳过 `claude-code`、`my-claude-fork`、`ClaudeTest`
+- `exclude_repos=spider-xhs-test,my-experiment` → 只跳过这两个特定的
+- 三个组合填: `upstream_owner_filter=cv-cat` + `exclude_pattern=test` + `exclude_repos=legacy-thing` → 只同步 cv-cat 旗下、名字不含 test、且不是 legacy-thing 的 fork
+
+> 仓库自带的自动跳过(`.github/.no-sync` 文件)依然生效,跟上面三种独立。详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
+
+---
+
+## 安全性
+
+- workflow 用的是 **你 (fork 者) 自己的 GITHUB_TOKEN**,跑在你自己的 runner 上
+- 不会访问模板作者 (`Link-Start`) 的任何东西
+- 代码完全开源,所有逻辑可见,放心 fork
+
+---
+
+## License
+
+MIT - 自由使用,自由修改。

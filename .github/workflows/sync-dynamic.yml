@@ -1,0 +1,268 @@
+# =============================================================================
+# GitHub Fork 自动同步工作流 - 动态发现版 (个人日常使用配置)
+# =============================================================================
+# 适用: 自动同步你名下指定 fork 到上游 (排除 claude 相关库)
+# 风格: 动态发现 (auto-discover) + 名称模式排除
+# 优势: 纯 API 调用,秒级完成,自动备份,智能判断 ahead/behind
+#
+# 跟 examples/sync-dynamic.yml 的区别:
+#   - examples/sync-dynamic.yml: 通用模板,默认同步所有 fork
+#   - 本文件 (sync-dynamic.yml): 作者日常使用,自动排除 claude 相关 fork
+#
+# 排除规则 (在 EXCLUDE_PATTERN 配置):
+#   - 名称含 "claude" (大小写不敏感) 的 fork 会被跳过
+#   - 想排除别的: 改 EXCLUDE_PATTERN,比如 "anthropic" / "openai" / "test"
+#   - 不想排除: 改成 ""
+#
+# 一次性配置 (3 步):
+#   1. 仓库 Settings → Actions → General → Workflow permissions
+#      改成 "Read and write permissions" (重要!否则 PATCH 全部 403)
+#   2. Actions 标签页点 "I understand my workflows, go ahead and enable them"
+#   3. (可选) 手动触发一次看效果
+#
+# 详细文档见 ../docs/ 目录
+# =============================================================================
+
+name: Sync My Forks (Exclude Claude)
+
+on:
+  # 每天 UTC 02:00 (北京时间 10:00) 自动跑一次
+  schedule:
+    - cron: '0 2 * * *'
+  # 允许 Actions 标签页手动触发
+  workflow_dispatch:
+    inputs:
+      upstream_owner_filter:
+        description: '只同步这个 owner 旗下的 fork (留空 = 所有)'
+        required: false
+        default: ''
+      exclude_pattern:
+        description: '排除仓库名含这个 pattern 的 fork (留空 = 用默认,匹配的是 fork 仓库名,不是 README 或代码)'
+        required: false
+        default: ''
+      exclude_repos:
+        description: '指定要排除的 fork 名,逗号分隔 (留空 = 不排除指定 fork)'
+        required: false
+        default: ''
+
+# 显式声明需要写权限
+permissions:
+  contents: write
+
+jobs:
+  sync-all:
+    runs-on: ubuntu-latest
+    env:
+      MY_OWNER: ${{ github.repository_owner }}
+      # 日常使用配置: 排除 claude 相关 fork
+      # 想排除别的关键词改这里 (大小写不敏感,匹配 fork 名称)
+      # 留空 = 不排除任何 fork
+      DEFAULT_EXCLUDE_PATTERN: 'claude'
+    steps:
+      # =====================================================================
+      # Step 1: 发现 fork
+      # =====================================================================
+      - name: Discover forks
+        id: discover
+        env:
+          FILTER: ${{ inputs.upstream_owner_filter }}
+          # 手动输入优先,否则用默认排除 pattern
+          EXCLUDE_PATTERN: ${{ inputs.exclude_pattern || env.DEFAULT_EXCLUDE_PATTERN }}
+          # 手动指定要排除的 fork 名 (逗号分隔,精确匹配)
+          EXCLUDE_REPOS: ${{ inputs.exclude_repos }}
+        run: |
+          set -e
+
+          FORKS=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
+                  --jq '[.[] | select(.fork == true and .parent != null) | {
+                    name: .name,
+                    parent_name: .parent.name,
+                    parent_owner: .parent.owner.login,
+                    parent_default_branch: .parent.default_branch
+                  }]')
+
+          # 正向过滤: 只保留指定 owner 的 fork
+          if [ -n "$FILTER" ]; then
+            FORKS=$(echo "$FORKS" | jq --arg f "$FILTER" '[.[] | select(.parent_owner == $f)]')
+            echo "🔍 正向过滤: 只保留 parent_owner == $FILTER"
+          fi
+
+          # 反向过滤: 排除仓库名 (fork repo name) 含 EXCLUDE_PATTERN 的 fork (大小写不敏感)
+          # 注意: 只匹配仓库名,不看 README/代码/描述
+          if [ -n "$EXCLUDE_PATTERN" ]; then
+            FORKS=$(echo "$FORKS" | jq --arg e "$EXCLUDE_PATTERN" \
+              '[.[] | select((.name | ascii_downcase | contains($e | ascii_downcase)) | not)]')
+            echo "🚫 反向过滤: 排除仓库名含 '$EXCLUDE_PATTERN' (大小写不敏感,只匹配 fork 仓库名)"
+          fi
+
+          # 反向过滤: 排除指定名称的 fork (精确匹配,逗号分隔)
+          if [ -n "$EXCLUDE_REPOS" ]; then
+            # 把 "a, b ,c" 转成 ["a","b","c"] 这样的 JSON 数组
+            EXCLUDE_JSON=$(echo "$EXCLUDE_REPOS" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
+            EXCLUDE_COUNT=$(echo "$EXCLUDE_JSON" | jq length)
+            FORKS=$(echo "$FORKS" | jq --argjson excl "$EXCLUDE_JSON" \
+              '[.[] | select(.name as $n | $excl | index($n) == null)]')
+            echo "🚫 指定排除: $EXCLUDE_COUNT 个 fork → $EXCLUDE_REPOS"
+          fi
+
+          COUNT=$(echo "$FORKS" | jq length)
+          echo "forks<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FORKS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "⚠️ 没找到任何符合条件的 fork"
+            exit 0
+          fi
+
+          echo "🔍 发现 $COUNT 个 fork 待同步"
+          echo "$FORKS" | jq -r '.[] | "  - \(.name) ← \(.parent_owner)/\(.parent_name)"'
+
+      # =====================================================================
+      # Step 2: 逐个 fork 同步 (5 阶段执行流程)
+      # =====================================================================
+      - name: Sync each fork
+        env:
+          FORKS: ${{ steps.discover.outputs.forks }}
+        run: |
+          set -e
+
+          echo "$FORKS" | jq -c '.[]' | while read -r fork; do
+            FORK_REPO=$(echo "$fork" | jq -r '.name')
+            UPSTREAM_OWNER=$(echo "$fork" | jq -r '.parent_owner')
+            UPSTREAM_REPO=$(echo "$fork" | jq -r '.parent_name')
+            UPSTREAM_DEFAULT=$(echo "$fork" | jq -r '.parent_default_branch')
+
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔄 $FORK_REPO ← $UPSTREAM_OWNER/$UPSTREAM_REPO"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            # ----- 阶段 1: 上游存活检查 -----
+            if [ -z "$UPSTREAM_DEFAULT" ]; then
+              echo "::warning::上游不可访问 (删除/archived/私有化/网络故障),跳过"
+              continue
+            fi
+            echo "🔍 上游默认分支: $UPSTREAM_DEFAULT"
+
+            # ----- 阶段 2: 备份当前 fork 默认分支 -----
+            FORK_DEFAULT_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
+                               --jq '.object.sha' 2>/dev/null || echo "")
+            if [ -n "$FORK_DEFAULT_SHA" ]; then
+              BACKUP_TAG="backup/$(date +%Y%m%d-%H%M%S)-${FORK_DEFAULT_SHA:0:7}"
+              if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                   -f ref="refs/tags/$BACKUP_TAG" \
+                   -f sha="$FORK_DEFAULT_SHA" >/dev/null 2>&1; then
+                echo "💾 备份: $BACKUP_TAG → ${FORK_DEFAULT_SHA:0:7}"
+              fi
+            fi
+
+            # ----- 阶段 3: 遍历 upstream 分支,逐个同步 -----
+            SYNCED=()
+            FAILED=()
+            NEW=()
+
+            UPSTREAM_BRANCH_LIST=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
+                                   --jq -r '.[] | .name')
+
+            for branch in $UPSTREAM_BRANCH_LIST; do
+              echo "  ━━━ $branch ━━━"
+
+              # 3.1 拿 upstream SHA
+              UPSTREAM_SHA=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
+                             --jq '.object.sha' 2>/dev/null || echo "")
+              if [ -z "$UPSTREAM_SHA" ]; then
+                echo "    ❌ 拿不到 upstream SHA"
+                FAILED+=("$branch")
+                continue
+              fi
+
+              # 3.2 拿 fork SHA (可能不存在)
+              FORK_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$branch" \
+                         --jq '.object.sha' 2>/dev/null || echo "")
+
+              # 3.3 fork 没有 → POST 新建
+              if [ -z "$FORK_SHA" ]; then
+                if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                     -f ref="refs/heads/$branch" \
+                     -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
+                  echo "    🆕 新建 → ${UPSTREAM_SHA:0:7}"
+                  NEW+=("$branch")
+                  SYNCED+=("$branch")
+                else
+                  echo "    ❌ 新建失败"
+                  FAILED+=("$branch")
+                fi
+                continue
+              fi
+
+              # 3.4 compare 决策
+              COMPARE_JSON=$(gh api "repos/$MY_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
+                             --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}' \
+                             2>/dev/null || echo '{"status":"error"}')
+              STATUS=$(echo "$COMPARE_JSON" | jq -r '.status // "error"')
+              AHEAD=$(echo "$COMPARE_JSON" | jq -r '.ahead // 0')
+              BEHIND=$(echo "$COMPARE_JSON" | jq -r '.behind // 0')
+
+              case "$STATUS" in
+                identical)
+                  echo "    = 已同步 (${UPSTREAM_SHA:0:7})"
+                  ;;
+                behind)
+                  if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
+                       -f branch="$branch" >/dev/null 2>&1; then
+                    echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
+                    SYNCED+=("$branch")
+                  else
+                    if gh api -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                         -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                      echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
+                      SYNCED+=("$branch")
+                    else
+                      echo "    ❌ merge + PATCH 都失败"
+                      FAILED+=("$branch")
+                    fi
+                  fi
+                  ;;
+                ahead|diverged)
+                  if gh api -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                       -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                    echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
+                    SYNCED+=("$branch")
+                  else
+                    echo "    ❌ PATCH 失败"
+                    FAILED+=("$branch")
+                  fi
+                  ;;
+                *)
+                  echo "    ⚠️ compare 异常 (status=$STATUS)"
+                  FAILED+=("$branch")
+                  ;;
+              esac
+            done
+
+            # ----- 阶段 4: 清理旧 backup tag -----
+            KEPT=20
+            TAGS=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/refs/tags" \
+                   --jq -r '.[] | .ref' 2>/dev/null \
+                   | sed 's|refs/tags/||' \
+                   | grep '^backup/' || true)
+            TAG_COUNT=$(echo "$TAGS" | grep -c . || echo 0)
+            if [ "$TAG_COUNT" -gt "$KEPT" ]; then
+              echo "  🗑️ 清理旧 backup tag ($TAG_COUNT → 保留 $KEPT)"
+              echo "$TAGS" | tail -n +$((KEPT+1)) | while read -r tag; do
+                [ -z "$tag" ] && continue
+                gh api -X DELETE "repos/$MY_OWNER/$FORK_REPO/git/refs/tags/$tag" \
+                  >/dev/null 2>&1 && echo "    - $tag"
+              done
+            fi
+
+            # ----- 阶段 5: 单 fork 汇总 -----
+            echo ""
+            echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]}"
+          done
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ 全部 fork 处理完毕"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,0 +1,158 @@
+# =============================================================================
+# GitHub Fork 自动同步工作流 - 静态 matrix 版 (示例)
+# =============================================================================
+# 适用: fork 数量固定,想在 yml 里 hardcode 清单
+# 风格: 静态 matrix (跟动态发现是替代关系,二选一)
+#
+# ⚠️ 这是 examples/ 下的示例,fork 仓库后不会被自动跑
+#    启用步骤 (在 fork 后的仓库):
+#      1. 编辑下面的 matrix.fork 列表,改成你自己的 fork
+#      2. 移动到 .github/workflows/sync-static-matrix.yml
+#      3. 删掉 .github/workflows/sync-dynamic.yml (避免重复跑)
+#
+# 详细文档见 ../docs/06-multi-fork.md
+# =============================================================================
+
+name: Sync My Forks (Static Matrix)
+
+on:
+  # 每天 UTC 02:00 (北京时间 10:00) 自动跑一次
+  schedule:
+    - cron: '0 2 * * *'
+  # 允许手动触发
+  workflow_dispatch:
+
+# 显式声明需要写权限
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    # ===================================================================
+    # ✏️ 在这里改 matrix 列表,填你自己的 fork
+    # 格式: { fork_repo: <你的-fork名>, upstream_repo: <上游仓库名> }
+    # 上游 owner 从仓库自动推断 (用 .owner.login)
+    # ===================================================================
+    strategy:
+      matrix:
+        fork:
+          - { fork_repo: Spider_XHS_cv-cat,     upstream_repo: Spider_XHS }
+          - { fork_repo: OpenFeiShuApis-cv-cat, upstream_repo: OpenFeiShuApis }
+          - { fork_repo: WechatOAApis-cv-cat,   upstream_repo: WechatOAApis }
+          - { fork_repo: XhsSkills-cv-cat,      upstream_repo: XhsSkills }
+          - { fork_repo: TaoBaoApis-cv-cat,     upstream_repo: TaoBaoApis }
+          - { fork_repo: BilibiliApis-cv-cat,   upstream_repo: BilibiliApis }
+          - { fork_repo: ZhihuApis-cv-cat,      upstream_repo: ZhihuApis }
+          - { fork_repo: XianYuApis-cv-cat,     upstream_repo: XianYuApis }
+    runs-on: ubuntu-latest
+    env:
+      MY_OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: Sync ${{ matrix.fork.fork_repo }} ← ${{ matrix.fork.upstream_repo }}
+        env:
+          FORK_REPO: ${{ matrix.fork.fork_repo }}
+          UPSTREAM_REPO: ${{ matrix.fork.upstream_repo }}
+        run: |
+          set -e
+          SYNCED=()
+          FAILED=()
+          NEW=()
+
+          # ----- 阶段 1: 上游存活检查 -----
+          UPSTREAM_OWNER=$(gh api "repos/$UPSTREAM_REPO" --jq '.owner.login' 2>/dev/null || echo "")
+          UPSTREAM_DEFAULT=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" \
+                             --jq '.default_branch' 2>/dev/null || echo "")
+          if [ -z "$UPSTREAM_OWNER" ] || [ -z "$UPSTREAM_DEFAULT" ]; then
+            echo "::warning::$UPSTREAM_REPO 不可访问 (删除/archived),跳过"
+            exit 0
+          fi
+          echo "🔍 上游: $UPSTREAM_OWNER/$UPSTREAM_REPO (默认分支: $UPSTREAM_DEFAULT)"
+
+          # ----- 阶段 2: 备份 -----
+          FORK_DEFAULT_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
+                             --jq '.object.sha' 2>/dev/null || echo "")
+          if [ -n "$FORK_DEFAULT_SHA" ]; then
+            BACKUP_TAG="backup/$(date +%Y%m%d-%H%M%S)-${FORK_DEFAULT_SHA:0:7}"
+            if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                 -f ref="refs/tags/$BACKUP_TAG" \
+                 -f sha="$FORK_DEFAULT_SHA" >/dev/null 2>&1; then
+              echo "💾 备份: $BACKUP_TAG"
+            fi
+          fi
+
+          # ----- 阶段 3: 同步循环 -----
+          UPSTREAM_BRANCH_LIST=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
+                                 --jq -r '.[] | .name')
+
+          for branch in $UPSTREAM_BRANCH_LIST; do
+            UPSTREAM_SHA=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
+                           --jq '.object.sha' 2>/dev/null || echo "")
+            if [ -z "$UPSTREAM_SHA" ]; then
+              FAILED+=("$branch")
+              continue
+            fi
+
+            FORK_SHA=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$branch" \
+                       --jq '.object.sha' 2>/dev/null || echo "")
+
+            if [ -z "$FORK_SHA" ]; then
+              if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                   -f ref="refs/heads/$branch" \
+                   -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
+                NEW+=("$branch")
+                SYNCED+=("$branch")
+              else
+                FAILED+=("$branch")
+              fi
+              continue
+            fi
+
+            COMPARE_JSON=$(gh api "repos/$MY_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
+                           --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}' \
+                           2>/dev/null || echo '{"status":"error"}')
+            STATUS=$(echo "$COMPARE_JSON" | jq -r '.status // "error"')
+
+            case "$STATUS" in
+              identical) ;;
+              behind)
+                if gh api -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
+                     -f branch="$branch" >/dev/null 2>&1; then
+                  SYNCED+=("$branch")
+                elif gh api -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                     -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                  SYNCED+=("$branch")
+                else
+                  FAILED+=("$branch")
+                fi
+                ;;
+              ahead|diverged)
+                if gh api -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                     -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                  SYNCED+=("$branch")
+                else
+                  FAILED+=("$branch")
+                fi
+                ;;
+              *)
+                FAILED+=("$branch")
+                ;;
+            esac
+          done
+
+          # ----- 阶段 4: 清理旧 backup tag -----
+          KEPT=20
+          TAGS=$(gh api "repos/$MY_OWNER/$FORK_REPO/git/refs/tags" \
+                 --jq -r '.[] | .ref' 2>/dev/null \
+                 | sed 's|refs/tags/||' \
+                 | grep '^backup/' || true)
+          TAG_COUNT=$(echo "$TAGS" | grep -c . || echo 0)
+          if [ "$TAG_COUNT" -gt "$KEPT" ]; then
+            echo "$TAGS" | tail -n +$((KEPT+1)) | while read -r tag; do
+              [ -z "$tag" ] && continue
+              gh api -X DELETE "repos/$MY_OWNER/$FORK_REPO/git/refs/tags/$tag" >/dev/null 2>&1
+            done
+          fi
+
+          # ----- 阶段 5: 汇总 -----
+          echo "📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]}"
+          [ ${#FAILED[@]} -gt 0 ] && exit 1 || exit 0
