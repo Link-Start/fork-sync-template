@@ -75,6 +75,14 @@ on:
         options:
           - 'true'
           - 'false'
+      sync_mode:
+        description: '同步模式 (auto = 直接 force-patch;pr = 开 PR 让人审,只对 behind 状态有效)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - pr
       webhook_url:
         description: '完成后通知的 webhook URL (留空 = 不通知;支持 Slack / 钉钉 / 通用,看 webhook_type)'
         required: false
@@ -93,6 +101,7 @@ on:
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   sync-all:
@@ -196,6 +205,7 @@ jobs:
           MAX_PARALLEL: ${{ inputs.max_parallel || env.DEFAULT_MAX_PARALLEL }}
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.DEFAULT_SIZE_CHECK_EXEMPT }}
           DRY_RUN: ${{ inputs.dry_run }}
+          SYNC_MODE: ${{ inputs.sync_mode }}
         run: |
           set -e
 
@@ -380,18 +390,42 @@ jobs:
                   echo "    = 已同步 (${UPSTREAM_SHA:0:7})"
                   ;;
                 behind)
-                  if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
-                       -f branch="$branch" >/dev/null 2>&1; then
-                    echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
-                    SYNCED+=("$branch")
-                  else
-                    if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
-                         -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
-                      echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
+                  if [ "$SYNC_MODE" = "pr" ]; then
+                    # PR 模式: 建 sync 分支 + 开 PR,让用户审
+                    local PR_BRANCH PR_NUM
+                    PR_BRANCH="sync-upstream/${branch}-$(date +%Y%m%d-%H%M%S)"
+                    if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                         -f ref="refs/heads/$PR_BRANCH" \
+                         -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
+                      local PR_JSON
+                      PR_JSON=$(gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/pulls" \
+                                -f title="[Sync] $branch ← upstream (落后 $BEHIND)" \
+                                -f head="$PR_BRANCH" \
+                                -f base="$branch" \
+                                -f body="自动从 upstream 同步,$BEHIND 个 commit 待 review" 2>/dev/null)
+                      PR_NUM=$(echo "$PR_JSON" | jq -r '.number // empty' 2>/dev/null)
+                      echo "    🔀 落后 $BEHIND → 开 PR #$PR_NUM ($PR_BRANCH → $branch)"
+                      NEW+=("$branch:$PR_BRANCH")
                       SYNCED+=("$branch")
                     else
-                      echo "    ❌ merge + PATCH 都失败"
+                      echo "    ❌ PR 模式: sync 分支创建失败"
                       FAILED+=("$branch")
+                    fi
+                  else
+                    # auto 模式: 直接 merge-upstream,失败兜底 PATCH
+                    if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
+                         -f branch="$branch" >/dev/null 2>&1; then
+                      echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
+                      SYNCED+=("$branch")
+                    else
+                      if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                           -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                        echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
+                        SYNCED+=("$branch")
+                      else
+                        echo "    ❌ merge + PATCH 都失败"
+                        FAILED+=("$branch")
+                      fi
                     fi
                   fi
                   ;;
@@ -449,7 +483,7 @@ jobs:
               >> "$RUNNER_TEMP/summary.jsonl"
           }
           export -f process_fork
-          export MY_OWNER SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR
+          export MY_OWNER SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE
 
           # API 限流检查:剩余配额 = 0 时睡到 reset
           # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
