@@ -125,7 +125,7 @@ fork-sync-template/
 ├── examples/
 │   ├── sync-dynamic.yml              # 通用模板: 动态发现版 (同步所有 fork)
 │   └── sync-static.yml               # 通用模板: 静态 matrix 版 (要手写 fork 列表)
-├── docs/                              # 9 个独立文档
+├── docs/                              # 10 个独立文档
 │   ├── 01-architecture.md            # ← 你正在读
 │   ├── 02-setup.md
 │   ├── 03-api-flow.md
@@ -134,7 +134,8 @@ fork-sync-template/
 │   ├── 06-multi-fork.md
 │   ├── 07-skip-mechanisms.md
 │   ├── 08-advanced.md
-│   └── 09-template-distribution.md
+│   ├── 09-template-distribution.md
+│   └── 10-roadmap.md
 ├── README.md                          # 模板快速开始
 └── .gitignore
 ```
