@@ -28,12 +28,21 @@
 name: Sync My Forks (Exclude Claude)
 
 on:
-  # 每天 UTC 02:00 (北京时间 10:00) 自动跑一次
+  # 改频率:把下面 3 行取消注释你想用的,注释掉不用的 (cron 是 UTC 时间)
+  #   '0 2 * * *'    = 每天 02:00 (北京时间 10:00) — 默认
+  #   '0 */6 * * *'  = 每 6 小时 (00, 06, 12, 18)
+  #   '0 2 * * 1'    = 每周一 02:00
   schedule:
     - cron: '0 2 * * *'
+    # - cron: '0 */6 * * *'
+    # - cron: '0 2 * * 1'
   # 允许 Actions 标签页手动触发
   workflow_dispatch:
     inputs:
+      cron_schedule:
+        description: '手动触发时填的 cron 表达式,只 log 不影响逻辑 (实际自动 schedule 看上面块)'
+        required: false
+        default: ''
       upstream_owner_filter:
         description: '只同步这个 owner 旗下的 fork (留空 = 所有)'
         required: false
@@ -123,6 +132,8 @@ jobs:
           SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.DEFAULT_SIZE_DROP_THRESHOLD }}
           # 手动输入优先,否则用默认 size 豁免名单
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.DEFAULT_SIZE_CHECK_EXEMPT }}
+          # 手动触发的 cron (只 log,不影响自动 schedule)
+          CRON_SCHEDULE: ${{ inputs.cron_schedule }}
         run: |
           set -e
 
@@ -170,6 +181,11 @@ jobs:
 
           echo "🔍 发现 $COUNT 个 fork 待同步"
           echo "$FORKS" | jq -r '.[] | "  - \(.name) ← \(.parent_owner)/\(.parent_name)"'
+
+          # 手动触发时 echo 用户填的 cron_schedule (自动 schedule 走 schedule 块)
+          if [ -n "$CRON_SCHEDULE" ]; then
+            echo "🕐 手动触发,模拟 cron: $CRON_SCHEDULE"
+          fi
 
       # =====================================================================
       # Step 2: 并发同步 fork (5 阶段执行流程,每 fork 一份 log)
