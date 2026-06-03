@@ -285,6 +285,32 @@ jobs:
           }
           export -f gh_api_write
 
+          # 结构化事件日志:每条 JSON 一行,append 到 $RUNNER_TEMP/events.jsonl
+          # 供程序化分析,artifact 上传,issue 详情等用
+          # 用法: log_event <fork> <action> <result> [k=v ...]
+          log_event() {
+            local fork="$1" action="$2" result="$3"
+            shift 3
+            # 把 "k=v k=v" 形式的额外参数转成 JSON object
+            local extra_json="{}"
+            if [ "$#" -gt 0 ]; then
+              extra_json=$(printf '%s\n' "$@" | jq -R 'split("=") | {(.[0]): .[1]}' | jq -s 'add')
+            fi
+            jq -n -c \
+              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
+              --arg fork "$fork" \
+              --arg action "$action" \
+              --arg result "$result" \
+              --arg mode "$SYNC_MODE" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --argjson extra "$extra_json" \
+              '{ts: $ts, fork: $fork, action: $action, result: $result, mode: $mode, run_id: $run_id} + $extra' \
+              >> "$RUNNER_TEMP/events.jsonl" 2>/dev/null || true
+          }
+          export -f log_event
+          # 清空旧 events (新 run 重新开始)
+          : > "$RUNNER_TEMP/events.jsonl"
+
           # 单 fork 处理函数 (被 xargs -P 并发调用)
           # 每个调用重定向输出到独立 log 文件,最后按原顺序拼接
           process_fork() {
@@ -308,8 +334,10 @@ jobs:
             # ----- 阶段 1: 上游存活检查 -----
             if [ -z "$UPSTREAM_DEFAULT" ]; then
               echo "::warning::上游不可访问 (删除/archived/私有化/网络故障),跳过"
+              log_event "$FORK_REPO" "upstream_check" "fail" reason="不可访问"
               return 0
             fi
+            log_event "$FORK_REPO" "upstream_check" "ok" upstream="$UPSTREAM_OWNER/$UPSTREAM_REPO" default_branch="$UPSTREAM_DEFAULT"
             echo "🔍 上游默认分支: $UPSTREAM_DEFAULT"
 
             # ----- 阶段 1.5: 危险检测 - 上游体积暴减 -----
@@ -325,6 +353,7 @@ jobs:
                printf '%s' "$SIZE_CHECK_EXEMPT" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -Fxq "$FORK_REPO"; then
               echo "⏭️  豁免 size 检查: $FORK_REPO 在 SIZE_CHECK_EXEMPT 白名单里"
               SKIP_SIZE_CHECK=true
+              log_event "$FORK_REPO" "size_check" "exempt" reason="在白名单里"
             fi
             FORK_SIZE=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
             UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
@@ -335,6 +364,7 @@ jobs:
               RATIO=$(awk "BEGIN {printf \"%.1f\", $UPSTREAM_SIZE * 100 / $FORK_SIZE}")
               echo "::error::🛑 危险: 上游体积暴减 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB, 上游只剩 fork 的 ${RATIO}%,阈值 ${THRESHOLD_PCT}%)"
               echo "  疑似上游删除了源码,只留下 README/说明文件,跳过本次同步"
+              log_event "$FORK_REPO" "size_check" "skip" reason="上游体积暴减" fork_kb="$FORK_SIZE" upstream_kb="$UPSTREAM_SIZE" ratio_pct="$RATIO" threshold_pct="$THRESHOLD_PCT"
               echo "SKIPPED_SUMMARY|$FORK_REPO|上游体积暴减" >> "$log_file.summary"
               return 0
             fi
@@ -342,6 +372,7 @@ jobs:
               echo "📏 体积检查跳过 (豁免): fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB"
             else
               echo "📏 体积检查通过: fork=${FORK_SIZE}KB, upstream=${UPSTREAM_SIZE}KB (阈值 ${THRESHOLD_PCT}%)"
+              log_event "$FORK_REPO" "size_check" "pass" fork_kb="$FORK_SIZE" upstream_kb="$UPSTREAM_SIZE" threshold_pct="$THRESHOLD_PCT"
             fi
 
             # ----- 阶段 2: 备份当前 fork 默认分支 -----
@@ -355,6 +386,7 @@ jobs:
                    -f ref="refs/tags/$BACKUP_TAG" \
                    -f sha="$FORK_DEFAULT_SHA" >/dev/null 2>&1; then
                 echo "💾 备份: $BACKUP_TAG → ${FORK_DEFAULT_SHA:0:7}"
+                log_event "$FORK_REPO" "backup_tag" "ok" tag="$BACKUP_TAG" sha="${FORK_DEFAULT_SHA:0:7}"
               fi
             fi
 
@@ -387,9 +419,11 @@ jobs:
                   echo "    🆕 新建 → ${UPSTREAM_SHA:0:7}"
                   NEW+=("$branch")
                   SYNCED+=("$branch")
+                  log_event "$FORK_REPO" "sync_branch" "new" branch="$branch" upstream_sha="${UPSTREAM_SHA:0:7}"
                 else
                   echo "    ❌ 新建失败"
                   FAILED+=("$branch")
+                  log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" reason="新建失败"
                 fi
                 continue
               fi
@@ -415,8 +449,10 @@ jobs:
                        -f sha="$FORK_SHA" >/dev/null 2>&1; then
                     echo "    📦 本地修改备份: $BACKUP_BRANCH (含 $AHEAD 个 commit)"
                     LOCAL_BACKED_UP+=("$branch:$BACKUP_BRANCH")
+                    log_event "$FORK_REPO" "local_backup" "ok" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD"
                   else
                     echo "    ⚠️ 备份分支创建失败,继续 sync (本地修改可能丢失)"
+                    log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" reason="备份分支创建失败"
                   fi
                 fi
               fi
@@ -424,6 +460,7 @@ jobs:
               case "$STATUS" in
                 identical)
                   echo "    = 已同步 (${UPSTREAM_SHA:0:7})"
+                  log_event "$FORK_REPO" "sync_branch" "identical" branch="$branch" upstream_sha="${UPSTREAM_SHA:0:7}"
                   ;;
                 behind)
                   if [ "$SYNC_MODE" = "pr" ]; then
@@ -443,9 +480,11 @@ jobs:
                       echo "    🔀 落后 $BEHIND → 开 PR #$PR_NUM ($PR_BRANCH → $branch)"
                       NEW+=("$branch:$PR_BRANCH")
                       SYNCED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="pr" behind="$BEHIND" pr="$PR_NUM"
                     else
                       echo "    ❌ PR 模式: sync 分支创建失败"
                       FAILED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="pr" reason="sync 分支创建失败"
                     fi
                   else
                     # auto 模式: 直接 merge-upstream,失败兜底 PATCH
@@ -453,14 +492,17 @@ jobs:
                          -f branch="$branch" >/dev/null 2>&1; then
                       echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
                       SYNCED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="merge" behind="$BEHIND"
                     else
                       if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
                            -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
                         echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
                         SYNCED+=("$branch")
+                        log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="patch" behind="$BEHIND"
                       else
                         echo "    ❌ merge + PATCH 都失败"
                         FAILED+=("$branch")
+                        log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="auto" reason="merge + PATCH 都失败"
                       fi
                     fi
                   fi
@@ -470,14 +512,17 @@ jobs:
                        -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
                     echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
                     SYNCED+=("$branch")
+                    log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="force" ahead="$AHEAD" behind="$BEHIND"
                   else
                     echo "    ❌ PATCH 失败"
                     FAILED+=("$branch")
+                    log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="force" reason="PATCH 失败"
                   fi
                   ;;
                 *)
                   echo "    ⚠️ compare 异常 (status=$STATUS)"
                   FAILED+=("$branch")
+                  log_event "$FORK_REPO" "sync_branch" "error" branch="$branch" status="$STATUS"
                   ;;
               esac
             done
@@ -503,6 +548,11 @@ jobs:
             # ----- 阶段 5: 单 fork 汇总 -----
             echo ""
             echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]} 📦${#LOCAL_BACKED_UP[@]}"
+
+            # 写结构化汇总事件 (Item 11: JSON 日志)
+            log_event "$FORK_REPO" "fork_complete" "ok" \
+              new="${#NEW[@]}" synced="${#SYNCED[@]}" failed="${#FAILED[@]}" \
+              skipped="${#SKIPPED[@]}" local_backup="${#LOCAL_BACKED_UP[@]}"
 
             # 写汇总到共享 jsonl 文件 (并发安全,每 fork 追加一行)
             # 用 $RUNNER_TEMP 而非 $LOG_DIR,因为 LOG_DIR 会在 EXIT trap 里被删
@@ -560,6 +610,20 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ 全部 fork 处理完毕 (并发 $MAX_PARALLEL)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          # 把结构化 events 输出到主 log (Item 11),方便不下载 artifact 也能看到
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📋 结构化事件日志 (events.jsonl)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ -f "$RUNNER_TEMP/events.jsonl" ] && [ -s "$RUNNER_TEMP/events.jsonl" ]; then
+            cat "$RUNNER_TEMP/events.jsonl"
+            echo ""
+            EVENT_COUNT=$(wc -l < "$RUNNER_TEMP/events.jsonl" | tr -d ' ')
+            echo "📊 共 $EVENT_COUNT 条事件"
+          else
+            echo "(无事件)"
+          fi
 
       # =====================================================================
       # Step 3: 汇总到 issue (跑完自动开/更新一个固定 issue 贴汇总)
