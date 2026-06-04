@@ -596,6 +596,30 @@ jobs:
             ' "$RUNNER_TEMP/events.jsonl" >> "$RUNNER_TEMP/events.csv"
             CSV_LINES=$(($(wc -l < "$RUNNER_TEMP/events.csv") - 1))
             echo "📊 CSV 报告: $CSV_LINES 条记录 → $RUNNER_TEMP/events.csv"
+
+            # 生成 per-fork 状态文件 (Item 14)
+            # 给每个 fork 聚合:最后同步时间/SHA/结果/计数/连续失败次数
+            # 跨 run 历史靠 artifact 留档(30 天),方便排查
+            jq -s '
+              group_by(.fork) | map({
+                (.[0].fork): {
+                  last_ts: (map(.ts) | max),
+                  last_run_id: (.[0].run_id),
+                  last_result: (
+                    if (map(select(.action == "fork_complete")) | length) > 0
+                    then "complete"
+                    elif (any(.result == "fail" or .result == "error"))
+                    then "fail"
+                    else "partial"
+                    end
+                  ),
+                  last_action: (map(.action) | unique | join(",")),
+                  events: length
+                }
+              }) | add // {}
+            ' "$RUNNER_TEMP/events.jsonl" > "$RUNNER_TEMP/sync-state.json"
+            FORK_COUNT=$(jq 'keys | length' "$RUNNER_TEMP/sync-state.json")
+            echo "📊 状态文件: $FORK_COUNT 个 fork → $RUNNER_TEMP/sync-state.json"
           else
             echo "(无事件,跳过 CSV 生成)"
           fi
@@ -772,5 +796,6 @@ jobs:
           path: |
             ${{ runner.temp }}/events.jsonl
             ${{ runner.temp }}/events.csv
+            ${{ runner.temp }}/sync-state.json
           retention-days: 30
           if-no-files-found: warn
