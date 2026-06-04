@@ -824,9 +824,10 @@ jobs:
 
       # =====================================================================
       # Step 2.5: Drift 检测 (Item 15)
-      # 读仓库的 .drift-state.json(可能不存在)→ 合并本次结果 →
+      # 读 workflow-state 分支上的 .drift-state.json(可能不存在)→ 合并本次结果 →
       # 连续 3 次 fail 的 fork 开 issue 告警 → 写回新 state
-      # 跟 sync-config.yml 不同:.drift-state.json 是 workflow 自己管理的
+      # 跟 sync-config.yml 不同:.drift-state.json 是 workflow 自己管理的状态文件,
+      # 但不再写回 main,避免污染配置仓库主分支
       # =====================================================================
       - name: Detect drift
         if: always()
@@ -840,6 +841,7 @@ jobs:
           source "$RUNNER_TEMP/sync-lib.sh"
 
           DRIFT_FILE=".drift-state.json"
+          STATE_BRANCH="workflow-state"
           DRIFT_THRESHOLD=3
 
           SYNC_STATE="$RUNNER_TEMP/sync-state.json"
@@ -848,8 +850,8 @@ jobs:
             exit 0
           fi
 
-          # 读旧 drift state (可能 404)
-          OLD_DRIFT_JSON=$(gh_api_with_retry "repos/$MY_OWNER/$REPO/contents/$DRIFT_FILE" 2>/dev/null || echo "")
+          # 读 workflow-state 分支上的旧 drift state (可能分支或文件都不存在)
+          OLD_DRIFT_JSON=$(gh_api_with_retry "repos/$MY_OWNER/$REPO/contents/$DRIFT_FILE?ref=$STATE_BRANCH" 2>/dev/null || echo "")
           if [ -n "$OLD_DRIFT_JSON" ] && [ "$OLD_DRIFT_JSON" != "Not Found" ]; then
             OLD_B64=$(echo "$OLD_DRIFT_JSON" | jq -r '.content // ""')
             OLD_SHA=$(echo "$OLD_DRIFT_JSON" | jq -r '.sha // ""')
@@ -934,18 +936,34 @@ jobs:
 
           # 写回 .drift-state.json (用 API PUT)
           if [ "${DRY_RUN:-false}" = "true" ]; then
-            echo "[DRY-RUN] 写回 $DRIFT_FILE 跳过"
+            echo "[DRY-RUN] 写回 $STATE_BRANCH/$DRIFT_FILE 跳过"
           else
+            STATE_BRANCH_SHA=$(gh_api_with_retry "repos/$MY_OWNER/$REPO/git/ref/heads/$STATE_BRANCH" \
+              --jq '.object.sha // ""' 2>/dev/null || echo "")
+            if [ -z "$STATE_BRANCH_SHA" ]; then
+              DEFAULT_BRANCH=$(gh_api_with_retry "repos/$MY_OWNER/$REPO" --jq '.default_branch // "main"' 2>/dev/null || echo "main")
+              DEFAULT_SHA=$(gh_api_with_retry "repos/$MY_OWNER/$REPO/git/ref/heads/$DEFAULT_BRANCH" \
+                --jq '.object.sha // ""' 2>/dev/null || echo "")
+              if [ -n "$DEFAULT_SHA" ]; then
+                gh_api_write -X POST "repos/$MY_OWNER/$REPO/git/refs" \
+                  -f ref="refs/heads/$STATE_BRANCH" \
+                  -f sha="$DEFAULT_SHA" >/dev/null 2>&1 && \
+                  echo "🌿 已创建状态分支: $STATE_BRANCH ← $DEFAULT_BRANCH" || \
+                  echo "::warning::状态分支 $STATE_BRANCH 创建失败,后续写回可能失败"
+              fi
+            fi
+
             B64_CONTENT=$(echo "$NEW_STATE" | base64 -w 0)
             PUT_ARGS=(-X PUT "repos/$MY_OWNER/$REPO/contents/$DRIFT_FILE" \
               -f message="chore: update drift state (run $GITHUB_RUN_ID)" \
-              -f content="$B64_CONTENT")
+              -f content="$B64_CONTENT" \
+              -f branch="$STATE_BRANCH")
             if [ -n "$OLD_SHA" ]; then
               PUT_ARGS+=(-f sha="$OLD_SHA")
             fi
             gh_api_with_retry "${PUT_ARGS[@]}" >/dev/null 2>&1 && \
-              echo "📝 .drift-state.json 已更新" || \
-              echo "::warning::.drift-state.json 写回失败(权限或冲突)"
+              echo "📝 $STATE_BRANCH/$DRIFT_FILE 已更新" || \
+              echo "::warning::$STATE_BRANCH/$DRIFT_FILE 写回失败(权限或冲突)"
           fi
 
       # =====================================================================
