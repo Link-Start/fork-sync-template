@@ -453,9 +453,15 @@ jobs:
           # 单 fork 处理函数 (被 xargs -P 并发调用)
           # 每个调用重定向输出到独立 log 文件,最后按原顺序拼接
           process_fork() {
-            local fork_json="$1"
+            local fork_b64="$1"
+            local fork_json
             local FORK_REPO UPSTREAM_OWNER UPSTREAM_REPO UPSTREAM_DEFAULT
             local FORK_NAME
+            fork_json=$(printf '%s' "$fork_b64" | base64 -d 2>/dev/null || echo "")
+            if [ -z "$fork_json" ] || ! echo "$fork_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+              echo "::warning::收到非法 fork 参数,跳过"
+              return 0
+            fi
             FORK_NAME=$(echo "$fork_json" | jq -r '.name')
             local log_file="$LOG_DIR/${FORK_NAME}.log"
             exec > "$log_file" 2>&1
@@ -735,7 +741,11 @@ jobs:
                    | sed 's|refs/tags/||' \
                    | grep '^backup/' || true)
             local TAG_COUNT
-            TAG_COUNT=$(echo "$TAGS" | grep -c . || echo 0)
+            if [ -n "$TAGS" ]; then
+              TAG_COUNT=$(printf '%s\n' "$TAGS" | grep -c .)
+            else
+              TAG_COUNT=0
+            fi
             if [ "$TAG_COUNT" -gt "$KEPT" ]; then
               echo "  🗑️ 清理旧 backup tag ($TAG_COUNT → 保留 $KEPT)"
               echo "$TAGS" | tail -n +$((KEPT+1)) | while read -r tag; do
@@ -776,8 +786,8 @@ jobs:
           }
           check_rate_limit
 
-          # 并发跑 (MAX_PARALLEL 个同时),xargs 会等所有完成
-          echo "$FORKS" | jq -c '.[]' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$@"' _ {}
+          # 并发跑 (MAX_PARALLEL 个同时),用 base64 传递 JSON 避免 shell/xargs 吃掉引号
+          echo "$FORKS" | jq -r '.[] | @base64' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$1"' _ {}
 
           # 按原始 fork 顺序输出所有 log
           echo "$FORKS" | jq -r '.name' | while read -r name; do
@@ -928,7 +938,11 @@ jobs:
           # 找连续失败达到阈值的 fork
           ALERT_FORKS=$(echo "$NEW_STATE" | jq -r --argjson th "$DRIFT_THRESHOLD" \
             '.forks | to_entries | map(select(.value.consecutive_failures >= $th)) | .[].key')
-          ALERT_COUNT=$(echo -n "$ALERT_FORKS" | grep -c . || echo 0)
+          if [ -n "$ALERT_FORKS" ]; then
+            ALERT_COUNT=$(printf '%s\n' "$ALERT_FORKS" | grep -c .)
+          else
+            ALERT_COUNT=0
+          fi
 
           if [ "$ALERT_COUNT" -gt 0 ]; then
             echo "🚨 检测到 $ALERT_COUNT 个 fork 连续失败 ≥ $DRIFT_THRESHOLD 次: $ALERT_FORKS"
