@@ -9,9 +9,9 @@
 name: Health Check
 
 on:
-  # 每天 09:00 UTC (北京时间 17:00),跟 sync 错开
+  # 每天 23:00 UTC (北京时间次日 07:00),跟 sync (00:00 UTC = 08:00 北京) 错开
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 23 * * *'
   workflow_dispatch:
 
 permissions:
