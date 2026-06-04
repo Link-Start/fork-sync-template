@@ -47,6 +47,10 @@ on:
         description: '只同步这个 owner 旗下的 fork (留空 = 所有)'
         required: false
         default: ''
+      target_owners:
+        description: '要同步的 fork owner 列表 (逗号分隔,留空 = 自己;支持用户名和 org,自动判断)'
+        required: false
+        default: ''
       exclude_pattern:
         description: '排除仓库名含这个 pattern 的 fork (留空 = 用默认,匹配的是 fork 仓库名,不是 README 或代码)'
         required: false
@@ -179,16 +183,51 @@ jobs:
           CRON_SCHEDULE: ${{ inputs.cron_schedule }}
           # 当前仓库名 (用于读 .github/sync-config.yml)
           CONFIG_REPO: ${{ github.event.repository.name }}
+          # 多 owner 支持 (Item 17):逗号分隔,留空 = 自己
+          TARGET_OWNERS: ${{ inputs.target_owners }}
         run: |
           set -e
 
-          FORKS=$(gh_api_with_retry 'user/repos?per_page=100&type=owner&sort=updated' \
-                  --jq '[.[] | select(.fork == true and .parent != null) | {
-                    name: .name,
-                    parent_name: .parent.name,
-                    parent_owner: .parent.owner.login,
-                    parent_default_branch: .parent.default_branch
-                  }]')
+          # 收集 fork 列表:支持多 owner (Item 17)
+          # target_owners 留空 = 用 user/repos(自己)
+          # 有值 = 逐个尝试 users/{owner}/repos → 失败回退 orgs/{owner}/repos
+          FORKS="[]"
+          if [ -z "$TARGET_OWNERS" ]; then
+            RESP=$(gh_api_with_retry 'user/repos?per_page=100&type=owner&sort=updated' 2>/dev/null || echo "[]")
+            FORKS=$(echo "$RESP" | jq '[.[] | select(.fork == true and .parent != null) | {
+              name: .name,
+              fork_owner: .owner.login,
+              parent_name: .parent.name,
+              parent_owner: .parent.owner.login,
+              parent_default_branch: .parent.default_branch
+            }]')
+          else
+            OWNER_LIST=$(echo "$TARGET_OWNERS" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$')
+            OWNER_COUNT=$(echo "$OWNER_LIST" | wc -l | tr -d ' ')
+            echo "🌐 多 owner 模式: $OWNER_COUNT 个 owner → $(echo $OWNER_LIST | tr '\n' ',' | sed 's/,$//')"
+            for owner in $OWNER_LIST; do
+              RESP=$(gh_api_with_retry "users/$owner/repos?per_page=100&type=owner&sort=updated" 2>/dev/null || echo "")
+              # 失败回退到 org endpoint
+              if [ -z "$RESP" ] || ! echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
+                RESP=$(gh_api_with_retry "orgs/$owner/repos?per_page=100&sort=updated" 2>/dev/null || echo "[]")
+                if ! echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
+                  echo "  ⚠️ $owner: 既不是 user 也不是 org (或无权访问),跳过"
+                  continue
+                fi
+                echo "  ✓ $owner (org)"
+              else
+                echo "  ✓ $owner (user)"
+              fi
+              FORK_BATCH=$(echo "$RESP" | jq '[.[] | select(.fork == true and .parent != null) | {
+                name: .name,
+                fork_owner: .owner.login,
+                parent_name: .parent.name,
+                parent_owner: .parent.owner.login,
+                parent_default_branch: .parent.default_branch
+              }]')
+              FORKS=$(jq -s '.[0] + .[1]' <(echo "$FORKS") <(echo "$FORK_BATCH"))
+            done
+          fi
 
           # 正向过滤: 只保留指定 owner 的 fork
           if [ -n "$FILTER" ]; then
@@ -322,13 +361,16 @@ jobs:
             exec > "$log_file" 2>&1
 
             FORK_REPO=$(echo "$fork_json" | jq -r '.name')
+            # fork_owner 是 Item 17 多 owner 引入的字段;老数据没有就 fallback 到 MY_OWNER
+            FORK_OWNER=$(echo "$fork_json" | jq -r '.fork_owner // empty')
+            FORK_OWNER="${FORK_OWNER:-$MY_OWNER}"
             UPSTREAM_OWNER=$(echo "$fork_json" | jq -r '.parent_owner')
             UPSTREAM_REPO=$(echo "$fork_json" | jq -r '.parent_name')
             UPSTREAM_DEFAULT=$(echo "$fork_json" | jq -r '.parent_default_branch')
 
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "🔄 $FORK_REPO ← $UPSTREAM_OWNER/$UPSTREAM_REPO"
+            echo "🔄 $FORK_OWNER/$FORK_REPO ← $UPSTREAM_OWNER/$UPSTREAM_REPO"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
             # ----- 阶段 1: 上游存活检查 -----
@@ -355,7 +397,7 @@ jobs:
               SKIP_SIZE_CHECK=true
               log_event "$FORK_REPO" "size_check" "exempt" reason="在白名单里"
             fi
-            FORK_SIZE=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
+            FORK_SIZE=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
             UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
@@ -377,12 +419,12 @@ jobs:
 
             # ----- 阶段 2: 备份当前 fork 默认分支 -----
             local FORK_DEFAULT_SHA
-            FORK_DEFAULT_SHA=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
+            FORK_DEFAULT_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$UPSTREAM_DEFAULT" \
                                --jq '.object.sha' 2>/dev/null || echo "")
             if [ -n "$FORK_DEFAULT_SHA" ]; then
               local BACKUP_TAG
               BACKUP_TAG="backup/$(date +%Y%m%d-%H%M%S)-${FORK_DEFAULT_SHA:0:7}"
-              if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+              if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
                    -f ref="refs/tags/$BACKUP_TAG" \
                    -f sha="$FORK_DEFAULT_SHA" >/dev/null 2>&1; then
                 echo "💾 备份: $BACKUP_TAG → ${FORK_DEFAULT_SHA:0:7}"
@@ -409,11 +451,11 @@ jobs:
                 continue
               fi
 
-              FORK_SHA=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/git/ref/heads/$branch" \
+              FORK_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch" \
                          --jq '.object.sha' 2>/dev/null || echo "")
 
               if [ -z "$FORK_SHA" ]; then
-                if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
                      -f ref="refs/heads/$branch" \
                      -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
                   echo "    🆕 新建 → ${UPSTREAM_SHA:0:7}"
@@ -429,7 +471,7 @@ jobs:
               fi
 
               local COMPARE_JSON STATUS AHEAD BEHIND
-              COMPARE_JSON=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
+              COMPARE_JSON=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
                              --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}' \
                              2>/dev/null || echo '{"status":"error"}')
               STATUS=$(echo "$COMPARE_JSON" | jq -r '.status // "error"')
@@ -444,7 +486,7 @@ jobs:
                 if [ "$AHEAD" -gt 0 ] && [ -n "$FORK_SHA" ]; then
                   local BACKUP_BRANCH
                   BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
-                  if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                  if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
                        -f ref="refs/heads/$BACKUP_BRANCH" \
                        -f sha="$FORK_SHA" >/dev/null 2>&1; then
                     echo "    📦 本地修改备份: $BACKUP_BRANCH (含 $AHEAD 个 commit)"
@@ -467,11 +509,11 @@ jobs:
                     # PR 模式: 建 sync 分支 + 开 PR,让用户审
                     local PR_BRANCH PR_NUM
                     PR_BRANCH="sync-upstream/${branch}-$(date +%Y%m%d-%H%M%S)"
-                    if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/git/refs" \
+                    if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
                          -f ref="refs/heads/$PR_BRANCH" \
                          -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
                       local PR_JSON
-                      PR_JSON=$(gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/pulls" \
+                      PR_JSON=$(gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/pulls" \
                                 -f title="[Sync] $branch ← upstream (落后 $BEHIND)" \
                                 -f head="$PR_BRANCH" \
                                 -f base="$branch" \
@@ -488,13 +530,13 @@ jobs:
                     fi
                   else
                     # auto 模式: 直接 merge-upstream,失败兜底 PATCH
-                    if gh_api_write -X POST "repos/$MY_OWNER/$FORK_REPO/merge-upstream" \
+                    if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/merge-upstream" \
                          -f branch="$branch" >/dev/null 2>&1; then
                       echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
                       SYNCED+=("$branch")
                       log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="merge" behind="$BEHIND"
                     else
-                      if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                      if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
                            -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
                         echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
                         SYNCED+=("$branch")
@@ -508,7 +550,7 @@ jobs:
                   fi
                   ;;
                 ahead|diverged)
-                  if gh_api_write -X PATCH "repos/$MY_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                  if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
                        -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
                     echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
                     SYNCED+=("$branch")
@@ -530,7 +572,7 @@ jobs:
             # ----- 阶段 4: 清理旧 backup tag -----
             local KEPT=20
             local TAGS
-            TAGS=$(gh_api_with_retry "repos/$MY_OWNER/$FORK_REPO/git/refs/tags" \
+            TAGS=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/refs/tags" \
                    --jq -r '.[] | .ref' 2>/dev/null \
                    | sed 's|refs/tags/||' \
                    | grep '^backup/' || true)
@@ -540,7 +582,7 @@ jobs:
               echo "  🗑️ 清理旧 backup tag ($TAG_COUNT → 保留 $KEPT)"
               echo "$TAGS" | tail -n +$((KEPT+1)) | while read -r tag; do
                 [ -z "$tag" ] && continue
-                gh_api_write -X DELETE "repos/$MY_OWNER/$FORK_REPO/git/refs/tags/$tag" \
+                gh_api_write -X DELETE "repos/$FORK_OWNER/$FORK_REPO/git/refs/tags/$tag" \
                   >/dev/null 2>&1 && echo "    - $tag"
               done
             fi
