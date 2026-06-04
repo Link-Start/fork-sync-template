@@ -107,7 +107,8 @@ GitHub 网页 → fork 仓库 → 找到 backup tag → 点 "Compare" → 选 ma
 
 | 现象 | 原因 | 修复 |
 |---|---|---|
-| 所有 `gh api` 全失败 (403) | GITHUB_TOKEN 没 write 权限 | Settings → Actions → General → Workflow permissions → 改 **Read and write** |
+| 发现到了 fork,但 PATCH/POST 失败 (403) | `FORK_SYNC_TOKEN` 未配置或没有目标 fork 写权限 | 在配置仓库 Actions secrets 新增/修正 `FORK_SYNC_TOKEN`,给目标 fork `Contents: Read and write` |
+| 写 issue/report 失败 (403) | 当前配置仓库 token 权限不足 | Settings → Actions → General → Workflow permissions → 改 **Read and write**,或让 `FORK_SYNC_TOKEN` 覆盖配置仓库 |
 | "上游不可访问" warning | upstream 真的删了/archived | 这是预期,等 upstream 恢复 |
 | "新建分支失败" | fork 已有同名分支但被保护 | 检查分支保护规则 |
 | "PATCH 失败" | fork 仓库的分支有保护规则,不允许 force | 临时关保护,跑完再开 |
@@ -128,9 +129,11 @@ schedule:
 
 GitHub fork **不能配 webhook**(只有原仓库能配),所以只能用定时或手动。
 
-### Q4: GITHUB_TOKEN 权限怎么开?
+### Q4: GITHUB_TOKEN / FORK_SYNC_TOKEN 权限怎么配?
 
-`Settings → Actions → General → Workflow permissions` → 选 "Read and write permissions"。
+配置仓库的 `GITHUB_TOKEN`: `Settings → Actions → General → Workflow permissions` → 选 "Read and write permissions"。
+
+跨仓库同步用的 `FORK_SYNC_TOKEN`: 配置仓库 `Settings → Secrets and variables → Actions` → 新增 repository secret `FORK_SYNC_TOKEN`,值用你自己的 PAT。PAT 至少要覆盖目标 fork 的 `Contents: Read and write`;如果要写 issue 报告,还要覆盖配置仓库的 `Issues: Read and write`。
 
 ### Q5: fork 上的我自己的手动改的内容会被覆盖吗?
 

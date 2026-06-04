@@ -33,7 +33,7 @@ matrix:
 
 ---
 
-## 风格 2: 动态发现(零配置,自动适配)
+## 风格 2: 动态发现(免维护 fork 列表,自动适配)
 
 **完全不用写 fork 列表**,workflow 启动时自己问 GitHub API "我有几个 fork",然后逐个同步:
 
@@ -130,7 +130,7 @@ jobs:
 ```
 
 **特点**:
-- **零配置**:不用写 fork 列表,workflow 自己查
+- **免维护 fork 列表**:不用写 fork 列表,workflow 自己查
 - **新增 fork 自动同步**:你新 fork 一个仓库,明天就自动被 sync
 - **删除 fork 自动跳过**:你删了某个 fork,workflow 跑时就看不到了
 - **filter 可选**:手动触发时可以填 `cv-cat` 只同步 cv-cat 旗下的;不填就同步所有 fork

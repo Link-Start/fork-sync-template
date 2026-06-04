@@ -1,7 +1,7 @@
 # Fork Sync Template
 
 > 一套用于自动把 fork 仓库同步到上游 (upstream) 的 GitHub Actions 模板
-> **纯 API 实现 · 无需 checkout / push · 几秒跑完 · 自动备份 · 零配置通用**
+> **纯 API 实现 · 无需 checkout / push · 几秒跑完 · 自动备份 · 免维护 fork 列表**
 
 ---
 
@@ -57,12 +57,13 @@ fork-sync-template/
 
 ### 方式 1: 直接用默认配置 (排除 claude 相关)
 
-最简单,Fork 就能用:
+最简单,不用维护 fork 列表:
 
 1. **Fork 这个仓库** (点页面右上角的 Fork 按钮)
-2. **开 workflow 写权限**: 进你 fork 后的仓库 → Settings → Actions → General → Workflow permissions → 选 **Read and write permissions** → Save
-3. **开定时任务**: 进 Actions 标签页 → 看到黄色提示 "Workflows aren't being run on this forked repository" → 点 **"I understand my workflows, go ahead and enable them"**
-4. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
+2. **配置跨仓库 token**: 在配置仓库 Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`,值用你自己的 PAT,至少给目标 fork 仓库 `Contents: Read and write` 权限。
+3. **开 workflow 写权限**: 进你 fork 后的仓库 → Settings → Actions → General → Workflow permissions → 选 **Read and write permissions** → Save
+4. **开定时任务**: 进 Actions 标签页 → 看到黄色提示 "Workflows aren't being run on this forked repository" → 点 **"I understand my workflows, go ahead and enable them"**
+5. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
 
 **想改排除的关键词?** 编辑 `.github/workflows/sync-dynamic.yml` 里的 `DEFAULT_EXCLUDE_PATTERN: 'claude'`,改其他词或留空。
 
@@ -108,7 +109,7 @@ fork-sync-template/
 | 新增 fork | 自动包含 | 手动加 matrix 项 |
 | 删除 fork | 自动跳过 | 手动删 matrix 项 |
 | 排除某些 fork | 改 EXCLUDE_PATTERN 即可 | 在 matrix 删对应行 |
-| 适合谁 | 想要零配置 / fork 列表会变 | fork 数量固定 / 想精确控制 |
+| 适合谁 | fork 列表会变 / 不想维护 matrix | fork 数量固定 / 想精确控制 |
 
 详细对比见 [docs/06-multi-fork.md](docs/06-multi-fork.md)。
 
@@ -198,7 +199,7 @@ local-backup/master-20260603-153045-a1b2c3d
 
 ## 安全性
 
-- workflow 用的是 **你 (fork 者) 自己的 GITHUB_TOKEN**,跑在你自己的 runner 上
+- workflow 用的是 **你 (fork 者) 自己配置的 `FORK_SYNC_TOKEN`**,没配置时才回退当前仓库 `GITHUB_TOKEN`
 - 不会访问模板作者 (`Link-Start`) 的任何东西
 - 代码完全开源,所有逻辑可见,放心 fork
 

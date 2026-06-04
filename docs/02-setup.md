@@ -1,6 +1,6 @@
 # 02. 一次性配置 + 触发机制
 
-## 一次性配置 (4 步)
+## 一次性配置 (5 步)
 
 ### 步骤 1: 创建配置仓库并推入 yml
 
@@ -85,7 +85,26 @@ webhook_type: slack
 
 ---
 
-### 步骤 3: 给配置仓库开 workflow 写权限 ⚠️ 重要
+### 步骤 3: 配置跨仓库同步 token ⚠️ 重要
+
+动态版从一个配置仓库同步多个 fork,需要能写入那些目标 fork 的 token。当前配置仓库自带的 `GITHUB_TOKEN` 通常只能写当前配置仓库,不能写账号下其他 fork。
+
+1. 打开 **配置仓库** 的 `Settings` 标签
+2. 左侧菜单点 `Secrets and variables` → `Actions`
+3. 点 `New repository secret`
+4. 名字填 `FORK_SYNC_TOKEN`
+5. 值填你自己的 PAT
+
+PAT 权限建议:
+
+- Fine-grained PAT: 选择配置仓库和所有目标 fork,给 `Contents: Read and write`;如果用 PR 模式,再给 `Pull requests: Read and write`;如果要写 issue 报告,给配置仓库 `Issues: Read and write`。
+- Classic PAT: 至少需要能读写目标 fork 的 `repo` 相关权限。
+
+workflow 里 `GH_TOKEN` 会优先用 `secrets.FORK_SYNC_TOKEN`,没配置时才回退到 `github.token`。
+
+---
+
+### 步骤 4: 给配置仓库开 workflow 写权限 ⚠️ 重要
 
 注意是**配置仓库**(`<fork-name>-sync`)的 Settings,不是主 fork。
 
@@ -95,11 +114,11 @@ webhook_type: slack
 4. 选 **`Read and write permissions`** (不是默认的 Read only)
 5. 点 Save
 
-**为什么**:workflow 要 `PATCH`/`POST` 主 fork 的 `git/refs`,需要 write 权限。否则全部 403。
+**为什么**:回退到 `github.token` 时需要这个权限；即使配置了 `FORK_SYNC_TOKEN`,这个设置也能让当前配置仓库的 Actions/issue/report 权限更明确。
 
 ---
 
-### 步骤 4: 手动触发一次验证
+### 步骤 5: 手动触发一次验证
 
 1. 打开**配置仓库**的 `Actions` 标签
 2. 左侧选 "Sync My Forks (Exclude Claude)"

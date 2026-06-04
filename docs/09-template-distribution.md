@@ -52,7 +52,7 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 **类比**: 像雇了一个助理,每天早上他自己数你有多少个 fork,然后全帮你同步。**你完全不用管清单。**
 
 **特点**:
-- ✅ 零配置,新 fork 进来自动同步
+- ✅ 免维护 fork 列表,新 fork 进来自动同步
 - ✅ 删了 fork 自动跳过
 - ✅ **适合 fork 数量会变 / 想省心的人** (推荐)
 - ❌ yml 比风格 1 复杂一点 (但 fork 者不用改)
@@ -79,7 +79,7 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 ├── .github/workflows/
 │   └── sync-dynamic.yml             # ✅ 默认开,作者日常使用版 (默认排除 claude 相关)
 ├── examples/
-│   ├── sync-dynamic.yml             # 通用模板: 动态发现 (fork 者可选用,零配置)
+│   ├── sync-dynamic.yml             # 通用模板: 动态发现 (fork 者可选用,免维护 fork 列表)
 │   └── sync-static.yml              # 通用模板: 静态 matrix (fork 者可选用,要手写列表)
 └── README.md                         # 给 fork 者的指引
 ```
@@ -105,7 +105,7 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 
 ### 选项 A: 动态发现 (推荐,90% 的人选这个)
 
-**总共 3 步,不用改任何 yml。**
+**总共 4 步,不用改任何 yml。**
 
 **Step 1: Fork 模板**
 - 打开 `Link-Start/fork-sync-template`
@@ -121,7 +121,13 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 - 选 **Read and write permissions**
 - 点 **Save**
 
-**Step 3: 开定时任务**
+**Step 3: 配置跨仓库 token**
+- 还是在这个配置仓库的 **Settings**
+- 点 **Secrets and variables** → **Actions**
+- 新增 repository secret: `FORK_SYNC_TOKEN`
+- 值用 fork 者自己的 PAT,至少给目标 fork `Contents: Read and write`
+
+**Step 4: 开定时任务**
 - 进 **Actions** 标签页
 - 看到黄色提示 "Workflows aren't being run on this forked repository"
 - 点 **"I understand my workflows, go ahead and enable them"**
@@ -129,7 +135,7 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 **完事。** `sync-dynamic.yml` 会自动跑,扫描你账号下所有 fork,逐个同步。
 
 ✅ 不用改任何 yml
-✅ 零配置
+✅ 不用维护 fork 列表
 
 ---
 
@@ -175,8 +181,9 @@ matrix:
 - 点右上角**垃圾桶图标** 🗑️ (Delete this file)
 - 底部 Commit
 
-**Step 5: 开权限 + 开定时任务**
-- 跟选项 A 的 Step 2、Step 3 一样
+**Step 5: token + 开权限 + 开定时任务**
+- 跟选项 A 的 Step 2、Step 3、Step 4 一样
+- Settings → Secrets and variables → Actions → 新增 `FORK_SYNC_TOKEN`
 - Settings → Actions → General → Workflow permissions → "Read and write permissions"
 - Actions 标签页 → "I understand my workflows, go ahead and enable them"
 
@@ -191,10 +198,11 @@ matrix:
 | 1. Fork 模板 | ✅ | ✅ |
 | 2. 改 yml | ❌ 不用 | ✅ 要改 matrix 列表 |
 | 3. 删除/移动文件 | ❌ 不用 | ✅ 删 sync-dynamic,移 sync-static |
-| 4. 开写权限 | ✅ | ✅ |
-| 5. 开定时任务 | ✅ | ✅ |
+| 4. 配置 `FORK_SYNC_TOKEN` | ✅ | ✅ |
+| 5. 开写权限 | ✅ | ✅ |
+| 6. 开定时任务 | ✅ | ✅ |
 | **改 yml 工作量** | **0** | **要** |
-| **维护成本** | **低** (零配置) | **高** (加 fork 要改 yml) |
+| **维护成本** | **低** (不用维护 fork 列表) | **高** (加 fork 要改 yml) |
 | **适合谁** | **多数人 (推荐)** | fork 数量固定 / 想精确控制 |
 
 ---
@@ -230,7 +238,7 @@ workflow 跑的时候跳过列表里的 fork。
 
 ## 安全性:对模板作者零风险
 
-- workflow 用的是 **fork 者的 GITHUB_TOKEN**,跑在 fork 者自己的 runner 上
+- workflow 用的是 **fork 者自己的 `FORK_SYNC_TOKEN` / `GITHUB_TOKEN`**,跑在 fork 者自己的 runner 上
 - 不会访问你(模板作者)的任何东西
 - fork 者看到 yml 不放心,自己改了再跑就行,代码完全开源可见
 
@@ -280,12 +288,13 @@ Bob/
 
 ## 怎么用
 
-### 方式 1: 零配置 (推荐)
+### 方式 1: 动态发现 (推荐)
 
 1. Fork 这个仓库
-2. Settings → Actions → General → Workflow permissions 选 "Read and write permissions"
-3. Actions 标签页点 "I understand my workflows, go ahead and enable them"
-4. 完事。`sync-dynamic.yml` 会自动跑,同步你名下所有 fork。
+2. Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`
+3. Settings → Actions → General → Workflow permissions 选 "Read and write permissions"
+4. Actions 标签页点 "I understand my workflows, go ahead and enable them"
+5. 完事。`sync-dynamic.yml` 会自动跑,同步你名下所有 fork。
 
 ### 方式 2: 静态 matrix (适合 fork 数量固定)
 
@@ -293,8 +302,9 @@ Bob/
 2. 编辑 `examples/sync-static.yml`,把 matrix 列表改成你自己的 fork
 3. 把改好的文件移到 `.github/workflows/sync-static.yml`
 4. 删掉 `sync-dynamic.yml` (避免重复)
-5. Settings → Actions → General → Workflow permissions 选 "Read and write permissions"
-6. Actions 标签页点 "I understand my workflows, go ahead and enable them"
+5. Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`
+6. Settings → Actions → General → Workflow permissions 选 "Read and write permissions"
+7. Actions 标签页点 "I understand my workflows, go ahead and enable them"
 
 ## 跳过某些 fork
 
@@ -312,7 +322,7 @@ Bob/
 | 别人也能用 | ❌ | ✅ |
 | yml 维护 | 每处各维护一份 | 一份,所有人共用 |
 | fork 者跳过不想同步的 fork | 用 .no-sync / skip.txt | 用 .no-sync / skip.txt (一样) |
-| 安全风险 | 0 | 0 (fork 者用自己 token) |
+| 安全风险 | 0 | 0 (fork 者用自己的 `FORK_SYNC_TOKEN` / `GITHUB_TOKEN`) |
 
 ---
 
@@ -320,5 +330,5 @@ Bob/
 
 - 默认推荐动态发现 (`sync-dynamic.yml`),90% 的人用这个
 - 静态 matrix 放 `examples/` 备选,留给有特殊需求的人
-- 模板 README 里把"零配置 3 步"放在最显眼位置,大多数 fork 者只关心这个
+- 模板 README 里把"动态发现 4 步"放在最显眼位置,大多数 fork 者只关心这个
 - 如果想加更多选项(比如 filter upstream owner),可以加在动态发现的 `workflow_dispatch` input 里,跟 fork 数量无关

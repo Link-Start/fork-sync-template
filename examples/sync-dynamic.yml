@@ -1,7 +1,7 @@
 # =============================================================================
 # GitHub Fork 自动同步工作流 - 动态发现版 (通用模板)
 # =============================================================================
-# 适用: 自动同步你名下所有 fork 到上游,零配置通用
+# 适用: 自动同步你名下所有 fork 到上游,免维护 fork 列表
 # 风格: 动态发现 (auto-discover),不需要 hardcode fork 列表
 # 优势: 纯 API 调用,秒级完成,自动备份,智能判断 ahead/behind
 #
@@ -13,8 +13,10 @@
 #   1. 把本文件复制到 .github/workflows/sync-dynamic.yml
 #      (或自己起名,但要确保在 .github/workflows/ 里才会被 GitHub 自动跑)
 #   2. 删掉或改名 .github/workflows/ 里现有的同名 yml (避免冲突)
-#   3. 仓库 Settings → Actions → General → Workflow permissions 选 "Read and write permissions"
-#   4. Actions 标签页点 "I understand my workflows, go ahead and enable them"
+#   3. 仓库 Settings → Secrets and variables → Actions 新增 FORK_SYNC_TOKEN
+#      (PAT,需要目标 fork 的 Contents read/write 权限)
+#   4. 仓库 Settings → Actions → General → Workflow permissions 选 "Read and write permissions"
+#   5. Actions 标签页点 "I understand my workflows, go ahead and enable them"
 #
 # 详细文档见 ../docs/ 目录
 # =============================================================================
@@ -102,6 +104,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MY_OWNER: ${{ github.repository_owner }}
+      # 多仓库同步请配置 FORK_SYNC_TOKEN (PAT);否则通常只能写当前配置仓库。
+      GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
       # 通用模板默认不设阈值,让 forker 手动触发时填
       # 推荐 0.10 (敏感) 或 0.30 (宽松),0 = 关闭
       DEFAULT_SIZE_DROP_THRESHOLD: '0.10'
@@ -226,43 +230,98 @@ jobs:
           # (每个 step 是独立 bash 调用,函数不跨 step 共享,必须 source)
           source "$RUNNER_TEMP/sync-lib.sh"
 
-          # 收集 fork 列表:支持多 owner (Item 17)
-          # target_owners 留空 = 用 user/repos(自己)
-          # 有值 = 逐个尝试 users/{owner}/repos → 失败回退 orgs/{owner}/repos
+          json_lines_to_array() {
+            if [ -n "$1" ]; then
+              printf '%s\n' "$1" | jq -s '.'
+            else
+              echo "[]"
+            fi
+          }
+
+          list_authenticated_owner_fork_candidates() {
+            local lines
+            if lines=$(gh_api_with_retry --paginate 'user/repos?per_page=100&type=owner&sort=updated' \
+              --jq ".[] | select(.fork == true and .owner.login == \"$MY_OWNER\") | {name: .name, fork_owner: .owner.login}" 2>/dev/null); then
+              json_lines_to_array "$lines"
+            else
+              echo "[]"
+            fi
+          }
+
+          list_named_owner_fork_candidates() {
+            local owner="$1"
+            local lines
+
+            if lines=$(gh_api_with_retry --paginate "users/$owner/repos?per_page=100&type=owner&sort=updated" \
+              --jq '.[] | select(.fork == true) | {name: .name, fork_owner: .owner.login}' 2>/dev/null); then
+              echo "  ✓ $owner (user/public endpoint)" >&2
+              json_lines_to_array "$lines"
+              return 0
+            fi
+
+            if lines=$(gh_api_with_retry --paginate "orgs/$owner/repos?per_page=100&sort=updated" \
+              --jq '.[] | select(.fork == true) | {name: .name, fork_owner: .owner.login}' 2>/dev/null); then
+              echo "  ✓ $owner (org endpoint)" >&2
+              json_lines_to_array "$lines"
+              return 0
+            fi
+
+            echo "  ⚠️ $owner: 既不是 user 也不是 org (或无权访问),跳过" >&2
+            echo "[]"
+            return 1
+          }
+
+          enrich_fork_candidates() {
+            local candidates="$1"
+            local candidate_count
+            candidate_count=$(echo "$candidates" | jq length)
+            if [ "$candidate_count" -eq 0 ]; then
+              echo "[]"
+              return 0
+            fi
+
+            echo "  ↳ 补齐 $candidate_count 个 fork 的 upstream 信息" >&2
+            while IFS= read -r fork_json; do
+              local fork_owner fork_name detail
+              fork_owner=$(echo "$fork_json" | jq -r '.fork_owner')
+              fork_name=$(echo "$fork_json" | jq -r '.name')
+
+              if detail=$(gh_api_with_retry "repos/$fork_owner/$fork_name" 2>/dev/null); then
+                if echo "$detail" | jq -e '.fork == true and .parent != null' >/dev/null 2>&1; then
+                  echo "$detail" | jq -c '{
+                    name: .name,
+                    fork_owner: .owner.login,
+                    parent_name: .parent.name,
+                    parent_owner: .parent.owner.login,
+                    parent_default_branch: .parent.default_branch
+                  }'
+                else
+                  echo "  ⚠️ $fork_owner/$fork_name: parent 信息不可用,跳过" >&2
+                fi
+              else
+                echo "  ⚠️ $fork_owner/$fork_name: 仓库详情不可访问,跳过" >&2
+              fi
+            done < <(echo "$candidates" | jq -c '.[]') | jq -s '.'
+          }
+
+          # 收集 fork 列表:列表 API 只保证有 fork=true,不保证带 parent/source。
+          # 所以先分页拿候选,再逐个 GET /repos/{owner}/{repo} 补齐 upstream。
           FORKS="[]"
           if [ -z "$TARGET_OWNERS" ]; then
-            RESP=$(gh_api_with_retry 'user/repos?per_page=100&type=owner&sort=updated' 2>/dev/null || echo "[]")
-            FORKS=$(echo "$RESP" | jq '[.[] | select(.fork == true and .parent != null) | {
-              name: .name,
-              fork_owner: .owner.login,
-              parent_name: .parent.name,
-              parent_owner: .parent.owner.login,
-              parent_default_branch: .parent.default_branch
-            }]')
+            echo "🌐 默认 owner: $MY_OWNER"
+            AUTH_CANDIDATES=$(list_authenticated_owner_fork_candidates)
+            PUBLIC_CANDIDATES=$(list_named_owner_fork_candidates "$MY_OWNER" || true)
+            CANDIDATES=$(jq -s 'add | unique_by(.fork_owner + "/" + .name)' \
+              <(echo "$AUTH_CANDIDATES") <(echo "$PUBLIC_CANDIDATES"))
+            FORKS=$(enrich_fork_candidates "$CANDIDATES")
           else
             OWNER_LIST=$(echo "$TARGET_OWNERS" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$')
             OWNER_COUNT=$(echo "$OWNER_LIST" | wc -l | tr -d ' ')
             echo "🌐 多 owner 模式: $OWNER_COUNT 个 owner → $(echo $OWNER_LIST | tr '\n' ',' | sed 's/,$//')"
             for owner in $OWNER_LIST; do
-              RESP=$(gh_api_with_retry "users/$owner/repos?per_page=100&type=owner&sort=updated" 2>/dev/null || echo "")
-              if [ -z "$RESP" ] || ! echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
-                RESP=$(gh_api_with_retry "orgs/$owner/repos?per_page=100&sort=updated" 2>/dev/null || echo "[]")
-                if ! echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
-                  echo "  ⚠️ $owner: 既不是 user 也不是 org (或无权访问),跳过"
-                  continue
-                fi
-                echo "  ✓ $owner (org)"
-              else
-                echo "  ✓ $owner (user)"
-              fi
-              FORK_BATCH=$(echo "$RESP" | jq '[.[] | select(.fork == true and .parent != null) | {
-                name: .name,
-                fork_owner: .owner.login,
-                parent_name: .parent.name,
-                parent_owner: .parent.owner.login,
-                parent_default_branch: .parent.default_branch
-              }]')
-              FORKS=$(jq -s '.[0] + .[1]' <(echo "$FORKS") <(echo "$FORK_BATCH"))
+              CANDIDATES=$(list_named_owner_fork_candidates "$owner" || true)
+              FORK_BATCH=$(enrich_fork_candidates "$CANDIDATES")
+              FORKS=$(jq -s 'add | unique_by(.fork_owner + "/" + .name)' <(echo "$FORKS") <(echo "$FORK_BATCH"))
             done
           fi
 
