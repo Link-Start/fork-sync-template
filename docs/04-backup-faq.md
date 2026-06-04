@@ -150,7 +150,7 @@ GitHub fork **不能配 webhook**(只有原仓库能配),所以只能用定时�
 ```bash
 # 只同步 master 和 dev
 for branch in $(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
-                --jq -r '.[] | select(.name == "master" or .name == "dev") | .name'); do
+                --jq '.[] | select(.name == "master" or .name == "dev") | .name'); do
 ```
 
 ### Q7: 怎么禁用 backup tag 清理?

@@ -443,7 +443,7 @@ jobs:
           fi
 
           SKIP_LIST=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/skip.txt" \
-                      --jq -r '.content // ""' 2>/dev/null \
+                      --jq '.content // ""' 2>/dev/null \
                       | base64 -d 2>/dev/null \
                       | sed 's/^ *//;s/ *$//' \
                       | grep -v '^#' \
@@ -594,7 +594,7 @@ jobs:
             # ----- 阶段 3: 遍历 upstream 分支,逐个同步 -----
             local UPSTREAM_BRANCH_LIST
             UPSTREAM_BRANCH_LIST=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
-                                   --jq -r '.[] | .name' 2>/dev/null || true)
+                                   --jq '.[] | .name' 2>/dev/null || true)
             if [ -z "$UPSTREAM_BRANCH_LIST" ]; then
               echo "    ❌ 拿不到 upstream 分支列表"
               FAILED+=("__branches__")
@@ -737,7 +737,7 @@ jobs:
             local KEPT=20
             local TAGS
             TAGS=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/refs/tags" \
-                   --jq -r '.[] | .ref' 2>/dev/null \
+                   --jq '.[] | .ref' 2>/dev/null \
                    | sed 's|refs/tags/||' \
                    | grep '^backup/' || true)
             local TAG_COUNT
