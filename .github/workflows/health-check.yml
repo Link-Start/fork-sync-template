@@ -121,3 +121,9 @@ jobs:
             NEW_NUM=$(echo "$NEW_ISSUE" | jq -r '.number // empty')
             echo "📝 新开 health-check issue #$NEW_NUM"
           fi
+
+      - name: Fail on health check errors
+        if: steps.checks.outputs.failed > 0
+        run: |
+          echo "::error::health check failed: ${{ steps.checks.outputs.failed }} item(s)"
+          exit 1

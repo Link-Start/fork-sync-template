@@ -28,12 +28,15 @@
 ```
 fork-sync-template/
 ├── .github/
+│   ├── sync-config.yml.example       # 可选本地配置示例
 │   └── workflows/
-│       └── sync-dynamic.yml          # ✅ 作者日常使用配置 (默认排除 claude 相关 fork)
+│       ├── sync-dynamic.yml          # ✅ 作者日常使用配置 (默认排除 claude 相关 fork)
+│       ├── health-check.yml          # 独立健康检查
+│       └── rollback.yml              # 手动回滚 backup tag
 ├── examples/                          # 两种风格的通用模板 (fork 后不会被自动跑)
 │   ├── sync-dynamic.yml              # 通用动态发现 (排除 pattern 为空,同步所有 fork)
 │   └── sync-static.yml               # 通用静态 matrix (需要手写 fork 列表)
-├── docs/                              # 9 个独立文档
+├── docs/                              # 10 个独立文档
 │   ├── 01-architecture.md
 │   ├── 02-setup.md
 │   ├── 03-api-flow.md
@@ -42,7 +45,8 @@ fork-sync-template/
 │   ├── 06-multi-fork.md
 │   ├── 07-skip-mechanisms.md
 │   ├── 08-advanced.md
-│   └── 09-template-distribution.md
+│   ├── 09-template-distribution.md
+│   └── 10-roadmap.md
 ├── README.md                          # 本文件
 └── .gitignore
 ```
@@ -85,9 +89,11 @@ fork-sync-template/
 
 ### 跳过某些特定 fork (细粒度跳过)
 
-不管用哪个方式,都可以:
+动态版 workflow 内置两种执行阶段跳过机制:
 - 在那个 fork 自己的仓库加 `.github/.no-sync` 文件,内容随便写 (推荐)
 - 在这个配置仓库根目录加 `skip.txt`,每行一个 fork 名
+
+静态 matrix 版最直接的跳过方式是从 `matrix.fork` 列表删掉对应项。
 
 详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
 
@@ -110,7 +116,7 @@ fork-sync-template/
 
 ## 📚 详细文档
 
-按主题拆成 9 个独立文档,按需阅读:
+按主题拆成 10 个独立文档,按需阅读:
 
 | # | 文档 | 内容 | 何时读 |
 |---|---|---|---|

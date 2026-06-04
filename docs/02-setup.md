@@ -22,8 +22,15 @@ cd sync-config
 rm -f README.md
 mkdir -p .github/workflows
 
-# 1.3 拷贝 yml
+# 1.3 拷贝 workflow
 cp /path/to/fork-sync-template/.github/workflows/sync-dynamic.yml .github/workflows/
+
+# 可选:一并拷贝健康检查/回滚按钮
+cp /path/to/fork-sync-template/.github/workflows/health-check.yml .github/workflows/
+cp /path/to/fork-sync-template/.github/workflows/rollback.yml .github/workflows/
+
+# 可选:本地配置示例
+cp /path/to/fork-sync-template/.github/sync-config.yml.example .github/sync-config.yml
 
 # 1.4 commit + push
 git add .
@@ -42,21 +49,39 @@ cd / && rm -rf "$TMP"
 
 ---
 
-### 步骤 2: 修改仓库坐标
+### 步骤 2: 按需调整动态发现配置
 
-打开 `<fork-name>-sync` 仓库的 `.github/workflows/sync-dynamic.yml`,找到这段:
+当前动态版不需要填写 `UPSTREAM_OWNER` / `UPSTREAM_REPO` / `FORK_REPO` 这类静态坐标。它会通过 GitHub API 自动发现当前账号下的 fork,再读取每个 fork 的 parent/upstream 信息。
+
+常用配置有两种改法:
+
+**方式 A: 改 workflow 默认值**
+
+打开 `<fork-name>-sync` 仓库的 `.github/workflows/sync-dynamic.yml`,按需修改:
 
 ```yaml
 env:
-  UPSTREAM_OWNER: cv-cat           # ← 改成上游的作者/组织
-  UPSTREAM_REPO: Spider_XHS        # ← 改成上游的仓库名
-  FORK_OWNER: Link-Start           # ← 改成你 fork 后的账号
-  FORK_REPO: Spider_XHS_cv-cat     # ← 改成你 fork 后的仓库名
+  DEFAULT_EXCLUDE_PATTERN: 'claude'        # 排除仓库名含 claude 的 fork
+  DEFAULT_SIZE_DROP_THRESHOLD: '0.10'      # 上游体积暴减阈值
+  DEFAULT_MAX_PARALLEL: '4'                # 并发数
+  DEFAULT_SIZE_CHECK_EXEMPT: ''            # size 检查豁免 fork 名,逗号分隔
 ```
 
-**怎么找这些值**:
-- 浏览器打开上游仓库,URL 是 `https://github.com/<owner>/<repo>`,owner 和 repo 就是前两
-- fork 仓库同理
+**方式 B: 用 `.github/sync-config.yml` 覆盖默认值**
+
+如果你拷贝了 `.github/sync-config.yml.example`,可以把它改成 `.github/sync-config.yml` 并按需填写:
+
+```yaml
+exclude_pattern: "claude"
+exclude_repos: ""
+size_drop_threshold: 0.10
+size_check_exempt: ""
+max_parallel: 4
+sync_mode: auto
+webhook_type: slack
+```
+
+优先级是:手动触发 input > `.github/sync-config.yml` > workflow env default。
 
 ---
 
@@ -77,7 +102,7 @@ env:
 ### 步骤 4: 手动触发一次验证
 
 1. 打开**配置仓库**的 `Actions` 标签
-2. 左侧选 "Sync Upstream via API"
+2. 左侧选 "Sync My Forks (Exclude Claude)"
 3. 右侧点 "Run workflow" → 绿色按钮
 4. 等 10-20 秒,展开运行记录看日志
 5. **预期成功日志长这样**:
@@ -100,10 +125,10 @@ env:
 
 ```yaml
 schedule:
-  - cron: '0 2 * * *'
+  - cron: '0 0 * * *'
 ```
 
-- 每天 **UTC 02:00** 跑 (即 **北京时间 10:00**)
+- 每天 **UTC 00:00** 跑 (即 **北京时间 08:00**)
 - cron 格式: `分 时 日 月 周`,**注意是 UTC 时区**
 - GitHub 定时任务有 5-30 分钟误差,不一定精确到分
 

@@ -42,7 +42,7 @@ name: Sync All My Forks (Auto Discover)
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       upstream_owner_filter:

@@ -16,9 +16,9 @@
 name: Sync My Forks (Static Matrix)
 
 on:
-  # 每天 UTC 02:00 (北京时间 10:00) 自动跑一次
+  # 每天 UTC 00:00 (北京时间 08:00) 自动跑一次
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 0 * * *'
   # 允许手动触发
   workflow_dispatch:
 

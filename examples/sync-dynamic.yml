@@ -112,6 +112,68 @@ jobs:
       DEFAULT_SIZE_CHECK_EXEMPT: ''
     steps:
       # =====================================================================
+      # Step 0: 准备共享函数
+      # 保持"无需 checkout"架构: 不依赖仓库工作区里的脚本文件。
+      # =====================================================================
+      - name: Prepare shared helpers
+        run: |
+          set -e
+          cat > "$RUNNER_TEMP/sync-lib.sh" <<'SYNC_LIB'
+          #!/usr/bin/env bash
+
+          gh_api_with_retry() {
+            local max_attempts=3
+            local attempt=1
+            local delay=1
+            local output
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if output=$(gh api "$@" 2>/dev/null); then
+                echo "$output"
+                return 0
+              fi
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试" >&2
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+              attempt=$((attempt + 1))
+            done
+            echo "  ❌ gh api 最终失败 (3 次都失败)" >&2
+            return 1
+          }
+          export -f gh_api_with_retry
+
+          gh_api_write() {
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "[DRY-RUN] gh api $*"
+              return 0
+            fi
+            gh_api_with_retry "$@"
+          }
+          export -f gh_api_write
+
+          log_event() {
+            local fork="$1" action="$2" result="$3"
+            shift 3
+            local extra_json="{}"
+            if [ "$#" -gt 0 ]; then
+              extra_json=$(printf '%s\n' "$@" | jq -R 'split("=") | {(.[0]): (.[1:] | join("="))}' | jq -s 'add')
+            fi
+            jq -n -c \
+              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
+              --arg fork "$fork" \
+              --arg action "$action" \
+              --arg result "$result" \
+              --arg mode "${SYNC_MODE:-direct}" \
+              --arg run_id "${GITHUB_RUN_ID:-local}" \
+              --argjson extra "$extra_json" \
+              '{ts: $ts, fork: $fork, action: $action, result: $result, mode: $mode, run_id: $run_id} + $extra' \
+              >> "${RUNNER_TEMP:-/tmp}/events.jsonl" 2>/dev/null || true
+          }
+          export -f log_event
+          SYNC_LIB
+
+      # =====================================================================
       # Step 0: 读 .github/sync-config.yml (用户配置文件,优先级: input > config > default)
       # =====================================================================
       - name: Read sync config
@@ -120,6 +182,9 @@ jobs:
           CONFIG_REPO: ${{ github.event.repository.name }}
         run: |
           set -e
+          # 共享函数:gh_api_with_retry / gh_api_write / log_event
+          # (每个 step 是独立 bash 调用,函数不跨 step 共享,必须 source)
+          source "$RUNNER_TEMP/sync-lib.sh"
 
           CONFIG_YAML=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/.github/sync-config.yml" \
                         --jq '.content // ""' 2>/dev/null | base64 -d 2>/dev/null || echo "")
@@ -157,6 +222,9 @@ jobs:
           TARGET_OWNERS: ${{ inputs.target_owners }}
         run: |
           set -e
+          # 共享函数:gh_api_with_retry / gh_api_write / log_event
+          # (每个 step 是独立 bash 调用,函数不跨 step 共享,必须 source)
+          source "$RUNNER_TEMP/sync-lib.sh"
 
           # 收集 fork 列表:支持多 owner (Item 17)
           # target_owners 留空 = 用 user/repos(自己)
@@ -238,77 +306,50 @@ jobs:
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
           MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
+          SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.CONFIG_SIZE_DROP_THRESHOLD || env.DEFAULT_SIZE_DROP_THRESHOLD }}
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
+          CONFIG_REPO: ${{ github.event.repository.name }}
         run: |
           set -e
+          # 共享函数:gh_api_with_retry / gh_api_write / log_event
+          # (每个 step 是独立 bash 调用,函数不跨 step 共享,必须 source)
+          source "$RUNNER_TEMP/sync-lib.sh"
 
           # 每 fork 单独 log 文件,避免并发输出错乱
           LOG_DIR=$(mktemp -d)
           trap 'rm -rf "$LOG_DIR"' EXIT
 
-          # 重试包装:失败时 1s/2s/4s 指数退避,最多 3 次
-          # 适用于网络抖动 / 5xx / API 限流等临时错误
-          gh_api_with_retry() {
-            local max_attempts=3
-            local attempt=1
-            local delay=1
-            local output rc
-            while [ $attempt -le $max_attempts ]; do
-              if output=$(gh api "$@" 2>/dev/null); then
-                echo "$output"
-                return 0
-              fi
-              rc=$?
-              if [ $attempt -lt $max_attempts ]; then
-                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试" >&2
-                sleep "$delay"
-                delay=$((delay * 2))
-              fi
-              attempt=$((attempt + 1))
-            done
-            echo "  ❌ gh api 最终失败 (3 次都失败)" >&2
-            return 1
-          }
-          export -f gh_api_with_retry
-
-          # dry-run 包装:DRY_RUN=true 时只 echo 不真写
-          # 适用于所有 gh api 写操作 (POST/PATCH/DELETE)
-          gh_api_write() {
-            if [ "${DRY_RUN:-false}" = "true" ]; then
-              echo "[DRY-RUN] gh api $*"
-              return 0
-            fi
-            gh_api_with_retry "$@"
-          }
-          export -f gh_api_write
-
-          # 结构化事件日志:每条 JSON 一行,append 到 $RUNNER_TEMP/events.jsonl
-          # 供程序化分析,artifact 上传,issue 详情等用
-          # 用法: log_event <fork> <action> <result> [k=v ...]
-          log_event() {
-            local fork="$1" action="$2" result="$3"
-            shift 3
-            # 把 "k=v k=v" 形式的额外参数转成 JSON object
-            local extra_json="{}"
-            if [ "$#" -gt 0 ]; then
-              extra_json=$(printf '%s\n' "$@" | jq -R 'split("=") | {(.[0]): .[1]}' | jq -s 'add')
-            fi
-            jq -n -c \
-              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
-              --arg fork "$fork" \
-              --arg action "$action" \
-              --arg result "$result" \
-              --arg mode "$SYNC_MODE" \
-              --arg run_id "$GITHUB_RUN_ID" \
-              --argjson extra "$extra_json" \
-              '{ts: $ts, fork: $fork, action: $action, result: $result, mode: $mode, run_id: $run_id} + $extra' \
-              >> "$RUNNER_TEMP/events.jsonl" 2>/dev/null || true
-          }
-          export -f log_event
           # 清空旧 events (新 run 重新开始)
           : > "$RUNNER_TEMP/events.jsonl"
+          : > "$RUNNER_TEMP/summary.jsonl"
+
+          if ! echo "$FORKS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "::error::Discover forks 输出不是 JSON array"
+            exit 1
+          fi
+          FORK_COUNT=$(echo "$FORKS" | jq length)
+          if [ "$FORK_COUNT" -eq 0 ]; then
+            echo "⏭️  没有 fork 待同步"
+            exit 0
+          fi
+          if ! printf '%s' "$MAX_PARALLEL" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::warning::max_parallel='$MAX_PARALLEL' 非法,回退到 4"
+            MAX_PARALLEL=4
+          fi
+          if ! printf '%s' "$SIZE_DROP_THRESHOLD" | grep -Eq '^(0|[0-9]+([.][0-9]+)?)$'; then
+            echo "::warning::size_drop_threshold='$SIZE_DROP_THRESHOLD' 非法,回退到 0.10"
+            SIZE_DROP_THRESHOLD=0.10
+          fi
+
+          SKIP_LIST=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/skip.txt" \
+                      --jq -r '.content // ""' 2>/dev/null \
+                      | base64 -d 2>/dev/null \
+                      | sed 's/^ *//;s/ *$//' \
+                      | grep -v '^#' \
+                      | grep -v '^$' || true)
+          export SKIP_LIST
 
           # 单 fork 处理函数 (被 xargs -P 并发调用)
           # 每个调用重定向输出到独立 log 文件,最后按原顺序拼接
@@ -327,16 +368,68 @@ jobs:
             UPSTREAM_OWNER=$(echo "$fork_json" | jq -r '.parent_owner')
             UPSTREAM_REPO=$(echo "$fork_json" | jq -r '.parent_name')
             UPSTREAM_DEFAULT=$(echo "$fork_json" | jq -r '.parent_default_branch')
+            local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=()
+
+            write_fork_summary() {
+              local result="$1"
+              local reason="${2:-}"
+              if [ "${#FAILED[@]}" -gt 0 ]; then
+                result="fail"
+              fi
+
+              echo ""
+              echo "  📊 $FORK_REPO: result=$result 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]} 📦${#LOCAL_BACKED_UP[@]}"
+
+              log_event "$FORK_REPO" "fork_complete" "$result" \
+                new="${#NEW[@]}" synced="${#SYNCED[@]}" failed="${#FAILED[@]}" \
+                skipped="${#SKIPPED[@]}" local_backup="${#LOCAL_BACKED_UP[@]}" reason="$reason"
+
+              jq -n -c \
+                --arg name "$FORK_REPO" \
+                --arg result "$result" \
+                --arg reason "$reason" \
+                --argjson new "${#NEW[@]}" \
+                --argjson synced "${#SYNCED[@]}" \
+                --argjson failed "${#FAILED[@]}" \
+                --argjson skipped "${#SKIPPED[@]}" \
+                --argjson local_backup "${#LOCAL_BACKED_UP[@]}" \
+                --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{name: $name, result: $result, reason: $reason, new: $new, synced: $synced, failed: $failed, skipped: $skipped, local_backup: $local_backup, ts: $ts}' \
+                >> "$RUNNER_TEMP/summary.jsonl"
+            }
 
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "🔄 $FORK_OWNER/$FORK_REPO ← $UPSTREAM_OWNER/$UPSTREAM_REPO"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+            # ----- 阶段 0: 跳过检查 -----
+            local NO_SYNC_JSON SKIP_REASON
+            NO_SYNC_JSON=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/contents/.github/.no-sync" 2>/dev/null || true)
+            if [ -n "$NO_SYNC_JSON" ]; then
+              SKIP_REASON=$(echo "$NO_SYNC_JSON" | jq -r '.content // ""' 2>/dev/null | base64 -d 2>/dev/null | head -c 200 || true)
+              SKIP_REASON="${SKIP_REASON:-no-sync marker}"
+              echo "⏭️  跳过 $FORK_REPO (fork 自带 .github/.no-sync: $SKIP_REASON)"
+              SKIPPED+=("$FORK_REPO")
+              log_event "$FORK_REPO" "skip_check" "skip" reason=".github/.no-sync"
+              write_fork_summary "skip" ".github/.no-sync: $SKIP_REASON"
+              return 0
+            fi
+
+            if [ -n "$SKIP_LIST" ] && printf '%s\n' "$SKIP_LIST" | grep -qxF "$FORK_REPO"; then
+              echo "⏭️  跳过 $FORK_REPO (在 config 仓库 skip.txt 中)"
+              SKIPPED+=("$FORK_REPO")
+              log_event "$FORK_REPO" "skip_check" "skip" reason="skip.txt"
+              write_fork_summary "skip" "skip.txt"
+              return 0
+            fi
+
             # ----- 阶段 1: 上游存活检查 -----
             if [ -z "$UPSTREAM_DEFAULT" ]; then
               echo "::warning::上游不可访问 (删除/archived/私有化/网络故障),跳过"
               log_event "$FORK_REPO" "upstream_check" "fail" reason="不可访问"
+              SKIPPED+=("$FORK_REPO")
+              write_fork_summary "skip" "上游不可访问"
               return 0
             fi
             log_event "$FORK_REPO" "upstream_check" "ok" upstream="$UPSTREAM_OWNER/$UPSTREAM_REPO" default_branch="$UPSTREAM_DEFAULT"
@@ -357,8 +450,8 @@ jobs:
               SKIP_SIZE_CHECK=true
               log_event "$FORK_REPO" "size_check" "exempt" reason="在白名单里"
             fi
-            FORK_SIZE=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null)
-            UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null)
+            FORK_SIZE=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null || echo 0)
+            UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null || echo 0)
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
                [ "$(awk "BEGIN {print ($UPSTREAM_SIZE < $FORK_SIZE * $SIZE_DROP_THRESHOLD) ? 1 : 0}")" = "1" ]; then
@@ -367,6 +460,8 @@ jobs:
               echo "::error::🛑 危险: 上游体积暴减 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB, 上游只剩 fork 的 ${RATIO}%,阈值 ${THRESHOLD_PCT}%)"
               echo "  疑似上游删除了源码,只留下 README/说明文件,跳过本次同步"
               log_event "$FORK_REPO" "size_check" "skip" reason="上游体积暴减" fork_kb="$FORK_SIZE" upstream_kb="$UPSTREAM_SIZE" ratio_pct="$RATIO" threshold_pct="$THRESHOLD_PCT"
+              SKIPPED+=("$FORK_REPO")
+              write_fork_summary "skip" "上游体积暴减"
               return 0
             fi
             if [ "$SKIP_SIZE_CHECK" = "true" ]; then
@@ -392,11 +487,16 @@ jobs:
             fi
 
             # ----- 阶段 3: 遍历 upstream 分支,逐个同步 -----
-            local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=()
-
             local UPSTREAM_BRANCH_LIST
             UPSTREAM_BRANCH_LIST=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
-                                   --jq -r '.[] | .name')
+                                   --jq -r '.[] | .name' 2>/dev/null || true)
+            if [ -z "$UPSTREAM_BRANCH_LIST" ]; then
+              echo "    ❌ 拿不到 upstream 分支列表"
+              FAILED+=("__branches__")
+              log_event "$FORK_REPO" "sync_branch" "fail" reason="拿不到 upstream 分支列表"
+              write_fork_summary "fail" "拿不到 upstream 分支列表"
+              return 0
+            fi
 
             for branch in $UPSTREAM_BRANCH_LIST; do
               echo "  ━━━ $branch ━━━"
@@ -547,30 +647,10 @@ jobs:
             fi
 
             # ----- 阶段 5: 单 fork 汇总 -----
-            echo ""
-            echo "  📊 $FORK_REPO: 🆕${#NEW[@]} ✅${#SYNCED[@]} ❌${#FAILED[@]} ⏭️${#SKIPPED[@]} 📦${#LOCAL_BACKED_UP[@]}"
-
-            # 写结构化汇总事件 (Item 11: JSON 日志)
-            log_event "$FORK_REPO" "fork_complete" "ok" \
-              new="${#NEW[@]}" synced="${#SYNCED[@]}" failed="${#FAILED[@]}" \
-              skipped="${#SKIPPED[@]}" local_backup="${#LOCAL_BACKED_UP[@]}"
-
-            # 写汇总到共享 jsonl 文件 (并发安全,每 fork 追加一行)
-            # 用 $RUNNER_TEMP 而非 $LOG_DIR,因为 LOG_DIR 会在 EXIT trap 里被删
-            # Step 3 会读这份文件聚合后发 issue
-            jq -n -c \
-              --arg name "$FORK_REPO" \
-              --argjson new "${#NEW[@]}" \
-              --argjson synced "${#SYNCED[@]}" \
-              --argjson failed "${#FAILED[@]}" \
-              --argjson skipped "${#SKIPPED[@]}" \
-              --argjson local_backup "${#LOCAL_BACKED_UP[@]}" \
-              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              '{name: $name, new: $new, synced: $synced, failed: $failed, skipped: $skipped, local_backup: $local_backup, ts: $ts}' \
-              >> "$RUNNER_TEMP/summary.jsonl"
+            write_fork_summary "ok"
           }
           export -f process_fork
-          export MY_OWNER SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE
+          export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST
 
           # API 限流检查:剩余配额 = 0 时睡到 reset
           # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
@@ -598,7 +678,7 @@ jobs:
           check_rate_limit
 
           # 并发跑 (MAX_PARALLEL 个同时),xargs 会等所有完成
-          echo "$FORKS" | jq -c '.[]' | xargs -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$@"' _ {}
+          echo "$FORKS" | jq -c '.[]' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$@"' _ {}
 
           # 按原始 fork 顺序输出所有 log
           echo "$FORKS" | jq -r '.name' | while read -r name; do
@@ -647,10 +727,12 @@ jobs:
                   last_ts: (map(.ts) | max),
                   last_run_id: (.[0].run_id),
                   last_result: (
-                    if (map(select(.action == "fork_complete")) | length) > 0
-                    then "complete"
-                    elif (any(.result == "fail" or .result == "error"))
-                    then "fail"
+                    (map(select(.action == "fork_complete")) | last | .result) as $complete_result
+                    | if $complete_result == "fail" then "fail"
+                    elif $complete_result == "skip" then "skip"
+                    elif (any(.result == "fail" or .result == "error")) then "fail"
+                    elif $complete_result == "ok" then "complete"
+                    elif $complete_result != null then $complete_result
                     else "partial"
                     end
                   ),
@@ -665,18 +747,10 @@ jobs:
             echo "(无事件,跳过 CSV 生成)"
           fi
 
-          # 把结构化 events 输出到主 log (Item 11),方便不下载 artifact 也能看到
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📋 结构化事件日志 (events.jsonl)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          if [ -f "$RUNNER_TEMP/events.jsonl" ] && [ -s "$RUNNER_TEMP/events.jsonl" ]; then
-            cat "$RUNNER_TEMP/events.jsonl"
-            echo ""
-            EVENT_COUNT=$(wc -l < "$RUNNER_TEMP/events.jsonl" | tr -d ' ')
-            echo "📊 共 $EVENT_COUNT 条事件"
-          else
-            echo "(无事件)"
+          TOTAL_FAILED=$(jq -s '[.[].failed] | add // 0' "$RUNNER_TEMP/summary.jsonl" 2>/dev/null || echo 0)
+          if [ "$TOTAL_FAILED" -gt 0 ]; then
+            echo "::error::本次同步存在 $TOTAL_FAILED 个分支失败"
+            exit 1
           fi
 
       # =====================================================================
@@ -692,31 +766,12 @@ jobs:
           REPO: ${{ github.event.repository.name }}
         run: |
           set -e
+          # 共享函数:gh_api_with_retry / gh_api_write / log_event
+          # (每个 step 是独立 bash 调用,函数不跨 step 共享,必须 source)
+          source "$RUNNER_TEMP/sync-lib.sh"
 
           DRIFT_FILE=".drift-state.json"
           DRIFT_THRESHOLD=3
-
-          # 重试 + dry-run 包装 (subshell 隔离,重新定义)
-          gh_api_with_retry() {
-            local max_attempts=3 delay=1 attempt=1 output rc
-            while [ $attempt -le $max_attempts ]; do
-              if output=$(gh api "$@" 2>/dev/null); then
-                echo "$output"; return 0
-              fi
-              rc=$?
-              if [ $attempt -lt $max_attempts ]; then
-                sleep "$delay"; delay=$((delay * 2))
-              fi
-              attempt=$((attempt + 1))
-            done
-            return 1
-          }
-          gh_api_write() {
-            if [ "${DRY_RUN:-false}" = "true" ]; then
-              echo "[DRY-RUN] gh api $*"; return 0
-            fi
-            gh_api_with_retry "$@"
-          }
 
           SYNC_STATE="$RUNNER_TEMP/sync-state.json"
           if [ ! -f "$SYNC_STATE" ] || [ ! -s "$SYNC_STATE" ]; then
@@ -829,41 +884,12 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -e
+          # 共享函数:gh_api_with_retry / gh_api_write / log_event
+          # (每个 step 是独立 bash 调用,函数不跨 step 共享,必须 source)
+          source "$RUNNER_TEMP/sync-lib.sh"
 
           # 找 Step 2 写的 summary.jsonl
           SUMMARY_FILE="$RUNNER_TEMP/summary.jsonl"
-
-          # 重试包装 (Step 2 已定义,Step 3 subshell 隔离,需重新定义)
-          gh_api_with_retry() {
-            local max_attempts=3
-            local attempt=1
-            local delay=1
-            local output rc
-            while [ $attempt -le $max_attempts ]; do
-              if output=$(gh api "$@" 2>/dev/null); then
-                echo "$output"
-                return 0
-              fi
-              rc=$?
-              if [ $attempt -lt $max_attempts ]; then
-                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试" >&2
-                sleep "$delay"
-                delay=$((delay * 2))
-              fi
-              attempt=$((attempt + 1))
-            done
-            echo "  ❌ gh api 最终失败 (3 次都失败)" >&2
-            return 1
-          }
-
-          # dry-run 包装
-          gh_api_write() {
-            if [ "${DRY_RUN:-false}" = "true" ]; then
-              echo "[DRY-RUN] gh api $*"
-              return 0
-            fi
-            gh_api_with_retry "$@"
-          }
 
           if [ ! -f "$SUMMARY_FILE" ] || [ ! -s "$SUMMARY_FILE" ]; then
             echo "⚠️ 没找到 summary.jsonl ($SUMMARY_FILE),跳过 issue 通知"
@@ -883,10 +909,10 @@ jobs:
           # 拼 issue body (markdown)
           # 一次性 printf 拼好,避开 $(...) 吞尾部 \n 和 YAML literal block 不支持多行字符串拼接
           ISSUE_TITLE="🤖 Fork Sync Report"
-          HEADER=$(printf "## 同步汇总\n\n- **运行时间**: %s (UTC)\n- **同步 fork 数**: %s\n- 🆕 新建分支: **%s**\n- ✅ 已同步: **%s**\n- ❌ 失败: **%s**\n- ⏭️ 跳过: **%s**\n- 📦 本地修改备份: **%s**\n\n### 详情\n\n| Fork | 🆕 | ✅ | ❌ | ⏭️ | 📦 |\n|---|---|---|---|---|---|\n" \
+          HEADER=$(printf "## 同步汇总\n\n- **运行时间**: %s (UTC)\n- **同步 fork 数**: %s\n- 🆕 新建分支: **%s**\n- ✅ 已同步: **%s**\n- ❌ 失败: **%s**\n- ⏭️ 跳过: **%s**\n- 📦 本地修改备份: **%s**\n\n### 详情\n\n| Fork | Result | Reason | 🆕 | ✅ | ❌ | ⏭️ | 📦 |\n|---|---|---|---|---|---|---|---|\n" \
             "$RUN_TS" "$TOTAL" "$TOTAL_NEW" "$TOTAL_SYNCED" "$TOTAL_FAILED" "$TOTAL_SKIPPED" "$TOTAL_BACKUP")
           # 每 fork 一行 (jq -r 输出多行,直接拼到 header 后面)
-          DETAIL_ROWS=$(echo "$SUMMARY_JSON" | jq -r '.[] | "| \(.name) | \(.new) | \(.synced) | \(.failed) | \(.skipped) | \(.local_backup) |"')
+          DETAIL_ROWS=$(echo "$SUMMARY_JSON" | jq -r '.[] | "| \(.name) | \(.result // "ok") | \(.reason // "") | \(.new) | \(.synced) | \(.failed) | \(.skipped) | \(.local_backup) |"')
           # 一次性合并 header + 表格行
           ISSUE_BODY="${HEADER}${DETAIL_ROWS}"
 

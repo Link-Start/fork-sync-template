@@ -64,60 +64,28 @@ another-fork-to-skip' | base64 | tr -d '\n')"
 
 ---
 
-## 集成到 yml 的代码
+## 当前 workflow 行为
 
-加在同步循环**开头**(原 sync-dynamic.yml 的阶段 3.0 位置):
+这两种跳过机制已经内置在动态版 workflow 中,不需要再手动粘贴代码。
 
-```bash
-# ---------- 阶段 3.0: 跳过检查 (新加的) ----------
-SKIPPED=()  # 加在脚本顶部的变量初始化里
+执行顺序:
 
-# 方法 1: fork 自带 .github/.no-sync 文件
-SKIP_REASON=$(gh api "repos/$MY_OWNER/$FORK_REPO/contents/.github/.no-sync" \
-              --jq -r '.content // ""' 2>/dev/null \
-              | base64 -d 2>/dev/null | head -c 100 || echo "")
+1. 每个 fork 开始同步前,先读 fork 自己的 `.github/.no-sync`。
+2. 如果 `.github/.no-sync` 不存在,再检查配置仓库根目录的 `skip.txt`。
+3. 任一命中都会跳过整个 fork,不会创建 backup tag,不会同步任何分支。
+4. 跳过结果会写入 Actions log、`summary.jsonl`、issue 汇总、webhook 汇总和 artifact。
 
-# 方法 2: config 仓库的 skip.txt
-SKIP_LIST=$(gh api "repos/$GITHUB_REPOSITORY/contents/skip.txt" \
-            --jq -r '.content // ""' 2>/dev/null \
-            | base64 -d 2>/dev/null | grep -v '^#' | grep -v '^$' || echo "")
-
-if [ -n "$SKIP_REASON" ]; then
-  echo "⏭️ 跳过 $FORK_REPO (fork 自带 .no-sync: $SKIP_REASON)"
-  SKIPPED+=("$FORK_REPO")
-  continue
-fi
-
-if echo "$SKIP_LIST" | grep -qxF "$FORK_REPO"; then
-  echo "⏭️ 跳过 $FORK_REPO (在 config 仓库 skip.txt 中)"
-  SKIPPED+=("$FORK_REPO")
-  continue
-fi
-
-# 阶段 3.1 开始就是原来的 upstream SHA 获取逻辑
-UPSTREAM_SHA=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
-               --jq '.object.sha' 2>/dev/null || echo "")
-```
-
-汇总阶段 5 也要加一行:
-
-```bash
-echo "  ⏭️ 跳过:     ${#SKIPPED[@]}"
-[ ${#SKIPPED[@]} -gt 0 ] && echo "     $(printf '%s ' "${SKIPPED[@]}")"
-```
+注意:`exclude_pattern` / `exclude_repos` / `upstream_owner_filter` 是发现阶段过滤,命中的 fork 不会进入同步列表；`.no-sync` / `skip.txt` 是单 fork 执行阶段跳过,会进入汇总并显示为 `skip`。
 
 ---
 
 ## 汇总输出会变成这样
 
 ```
-📊 同步结果
-  🆕 新建分支: 0
-  ✅ 同步成功: 7
-  ⏭️ 跳过:     1
-     my-personal-experiment
-  ❌ 失败:     0
+📊 my-personal-experiment: result=skip 🆕0 ✅0 ❌0 ⏭️1 📦0
 ```
+
+issue 详情表会显示 `Result=skip` 和对应 reason,例如 `.github/.no-sync` 或 `skip.txt`。
 
 ---
 

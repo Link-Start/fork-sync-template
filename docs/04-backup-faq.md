@@ -119,10 +119,10 @@ GitHub 网页 → fork 仓库 → 找到 backup tag → 点 "Compare" → 选 ma
 
 ```yaml
 schedule:
-  - cron: '0 2 * * *'  # 改成你想要的
+  - cron: '0 0 * * *'  # 改成你想要的
 ```
 
-记得是 **UTC 时区**。想北京时间 8 点 = UTC 0 点,改成 `'0 0 * * *'`。
+记得是 **UTC 时区**。当前默认是 UTC 0 点,也就是北京时间 8 点。
 
 ### Q3: 为什么不用 webhook 触发?
 
