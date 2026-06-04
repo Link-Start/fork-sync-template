@@ -1,7 +1,42 @@
 # 10. 优化路线图
 
-> **未来 15+ 项优化建议**,按价值/风险分 4 个 Wave 实施。
+> **17 项优化全部完成** (2026-06-04),按价值/风险分 4 个 Wave 实施。
 > 每个 item 一个 commit,粒度清晰,独立可回退。
+
+---
+
+## 🎉 全部完成
+
+所有 17 项优化已实现并 push 到 main。详见底部 [进度跟踪](#进度跟踪) 表(每项带 commit 链接)。
+
+实施顺序(也是建议 review 顺序):
+
+1. **Wave 1**(高价值低风险,4 项):并发同步 / issue 摘要 / size 豁免 / dry-run
+2. **Wave 2**(中价值中风险,4 项):重试退避 / 限流等待 / webhook / 可配置 cron
+3. **Wave 3**(大改动,4 项):PR 模式 / 本地 config / JSON 日志 / CSV artifact
+4. **Wave 4**(锦上添花,5 项):健康检查 / 状态文件 / drift 检测 / 回滚按钮 / 多 owner
+
+## 📋 Changelog (2026-06-04)
+
+| Commit | Item | 改动 |
+|---|---|---|
+| `69196d9` | #1 并发同步 | xargs -P 4,N fork 节省一半时间 |
+| `a47c615` | #2 issue 摘要 | 跑完自动开/更新 issue 贴汇总 |
+| `6798064` | #3 size 豁免 | `size_check_exempt` 白名单,1KB CLI 工具不被误杀 |
+| `bd416b8` | #4 dry-run | `dry_run: true` 只看不动 |
+| `3da8eee` | #5 重试 | `gh_api_with_retry()` 1s/2s/4s 指数退避 |
+| `ce0fa96` | #6 限流 | `check_rate_limit()` 睡到 `X-RateLimit-Reset` |
+| `7986094` | #7 webhook | Slack/钉钉/通用 3 种格式,可选失败通知 |
+| `4a0901b` | #8 可配置 cron | 3 个 schedule 模板 + 手动 input log |
+| `73b02c8` | #9 PR 模式 | `sync_mode: pr` 落后时开 PR 不直接 force |
+| `cfe294c` | #10 本地 config | `.github/sync-config.yml` 优先级: input > config > default |
+| `ddf2061` | #11 JSON 日志 | `log_event()` 函数,关键节点全打 |
+| `9e41b1e` | #12 CSV artifact | events.csv + 30 天 artifact 留档 |
+| `c4cc5e3` | #13 health check | 独立 workflow 每天 09:00 UTC 检查 |
+| `cc030ce` | #14 状态文件 | per-fork sync-state.json 含 last_result |
+| `960c6f6` | #15 drift 检测 | 连续 3 次失败开 `drift-alert` issue |
+| `2f4cb56` + `16a6653` | #16 回滚 | 默认保守(建 review 分支)+ 可选强推 (revert 过原版) |
+| `1a00100` | #17 多 owner | `target_owners` 逗号分隔,user/org 自动判断 |
 
 ---
 
@@ -237,28 +272,34 @@
 | Wave | Item | 状态 | Commit |
 |---|---|---|---|
 | 文档 | 10-roadmap.md | ✅ 完成 | - |
-| Wave 1 | 1. 并发同步 | ⏳ 待开始 | - |
-| Wave 1 | 2. issue 通知 | ⏳ 待开始 | - |
-| Wave 1 | 3. size 豁免 | ⏳ 待开始 | - |
-| Wave 1 | 4. dry-run | ⏳ 待开始 | - |
-| Wave 2 | 5. 重试 | ⏳ 待开始 | - |
-| Wave 2 | 6. 限流 | ⏳ 待开始 | - |
-| Wave 2 | 7. webhook | ⏳ 待开始 | - |
-| Wave 2 | 8. 可配置 cron | ⏳ 待开始 | - |
-| Wave 3 | 10. 本地配置 | ⏳ 待开始 | - |
-| Wave 3 | 11. JSON 日志 | ⏳ 待开始 | - |
-| Wave 3 | 9. PR 模式 | ⏳ 待开始 | - |
-| Wave 3 | 12. CSV 报告 | ⏳ 待开始 | - |
-| Wave 4 | 13-17 | 按需 | - |
+| Wave 1 | 1. 并发同步 | ✅ 完成 | [`69196d9`](https://github.com/Link-Start/fork-sync-template/commit/69196d9) |
+| Wave 1 | 2. issue 摘要 | ✅ 完成 | [`a47c615`](https://github.com/Link-Start/fork-sync-template/commit/a47c615) |
+| Wave 1 | 3. size 豁免 | ✅ 完成 | [`6798064`](https://github.com/Link-Start/fork-sync-template/commit/6798064) |
+| Wave 1 | 4. dry-run | ✅ 完成 | [`bd416b8`](https://github.com/Link-Start/fork-sync-template/commit/bd416b8) |
+| Wave 2 | 5. 重试 | ✅ 完成 | [`3da8eee`](https://github.com/Link-Start/fork-sync-template/commit/3da8eee) |
+| Wave 2 | 6. 限流 | ✅ 完成 | [`ce0fa96`](https://github.com/Link-Start/fork-sync-template/commit/ce0fa96) |
+| Wave 2 | 7. webhook | ✅ 完成 | [`7986094`](https://github.com/Link-Start/fork-sync-template/commit/7986094) |
+| Wave 2 | 8. 可配置 cron | ✅ 完成 | [`4a0901b`](https://github.com/Link-Start/fork-sync-template/commit/4a0901b) |
+| Wave 3 | 9. PR 模式 | ✅ 完成 | [`73b02c8`](https://github.com/Link-Start/fork-sync-template/commit/73b02c8) |
+| Wave 3 | 10. 本地配置 | ✅ 完成 | [`cfe294c`](https://github.com/Link-Start/fork-sync-template/commit/cfe294c) |
+| Wave 3 | 11. JSON 日志 | ✅ 完成 | [`ddf2061`](https://github.com/Link-Start/fork-sync-template/commit/ddf2061) |
+| Wave 3 | 12. CSV 报告 | ✅ 完成 | [`9e41b1e`](https://github.com/Link-Start/fork-sync-template/commit/9e41b1e) |
+| Wave 4 | 13. health check | ✅ 完成 | [`c4cc5e3`](https://github.com/Link-Start/fork-sync-template/commit/c4cc5e3) |
+| Wave 4 | 14. 状态文件 | ✅ 完成 | [`cc030ce`](https://github.com/Link-Start/fork-sync-template/commit/cc030ce) |
+| Wave 4 | 15. drift 检测 | ✅ 完成 | [`960c6f6`](https://github.com/Link-Start/fork-sync-template/commit/960c6f6) |
+| Wave 4 | 16. 回滚按钮 | ✅ 完成 (revert 后重做) | [`2f4cb56`](https://github.com/Link-Start/fork-sync-template/commit/2f4cb56) + [`16a6653`](https://github.com/Link-Start/fork-sync-template/commit/16a6653) |
+| Wave 4 | 17. 多 owner | ✅ 完成 | [`1a00100`](https://github.com/Link-Start/fork-sync-template/commit/1a00100) |
 
 ---
 
-## 怎么贡献
+## 未来可加 (按需,未排期)
 
-每完成一个 item:
-1. 在 yml 里加功能
-2. 写测试(dry-run 跑一次)
-3. 更新这个文档的状态(✅ / ⏳ / 进度中)
-4. 提交:`feat: <item 标题>` 或 `docs: ...`
+如果以后想再加东西,以下是一些候选方向:
 
-**未在列表里的想法**:欢迎在 GitHub issues 提,讨论后加进路线图。
+- **per-fork 失败重试** — 单个 fork 失败自动重试 N 次 (目前重试是 per-API-call,不是 per-fork)
+- **sync dashboard** — 写个静态 HTML page 展示 sync 状态历史
+- **multi-repo 模板支持** — 一个 workflow 跑多个配置 (现在是单 repo)
+- **Slack interactive button** — 失败 issue 加 "立即回滚" / "跳过这次" 按钮
+- **更细粒度 webhook** — 按成功/失败/fail 数 阈值发不同级别通知
+
+**怎么贡献**:在 GitHub issues 提,讨论后加进这份路线图。

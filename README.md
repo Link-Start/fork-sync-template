@@ -123,7 +123,7 @@ fork-sync-template/
 | 7 | [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md) | 怎么让某些 fork 不参与同步 | 有不想同步的 fork |
 | 8 | [docs/08-advanced.md](docs/08-advanced.md) | 网络重试、通知、reusable workflow | 想深度定制 |
 | 9 | [docs/09-template-distribution.md](docs/09-template-distribution.md) | 模板分发的设计思路 | 想理解这个模板为什么这么设计 |
-| 10 | [docs/10-roadmap.md](docs/10-roadmap.md) | 15+ 项优化路线图(4 个 Wave) | 想看未来要做什么 |
+| 10 | [docs/10-roadmap.md](docs/10-roadmap.md) | 17 项优化路线图(4 个 Wave,**全部完成**) | 想看历史/未来要做什么 |
 
 ---
 
