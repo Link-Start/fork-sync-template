@@ -1,0 +1,175 @@
+# =============================================================================
+# GitHub Fork Sync - 回滚按钮
+# =============================================================================
+# 用途: 把 fork 恢复到某个 backup tag 指向的 SHA
+# 触发: workflow_dispatch 手动 (4 个 input)
+# 设计原则: 默认保守,不动默认分支,只建 review 分支
+#   - restore_to_default = no (默认): 建 restore-from-backup/{tag} 分支
+#     用户可以 diff/merge/PR,留 review 痕迹
+#   - restore_to_default = yes: 强推 default (破坏性,需要 confirm=yes)
+# 配合: Item 2 backup tag (backup/{时间戳}-{sha7}) / Item 2.4 local-backup branch
+# =============================================================================
+
+name: Rollback Fork
+
+on:
+  workflow_dispatch:
+    inputs:
+      fork:
+        description: '要回滚的 fork 仓库名 (例: my-fork)'
+        required: true
+        type: string
+      tag:
+        description: '要回滚到的 backup tag (例: backup/20260604-013000-abc1234) — 留空则只列出 tags'
+        required: false
+        type: string
+        default: ''
+      restore_to_default:
+        description: '还原方式:no = 只建 restore-from-backup 分支 (默认,推荐);yes = 强推 default 分支 (破坏性)'
+        required: true
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+        default: 'no'
+      confirm:
+        description: '填 yes 确认执行 (即使是默认 no 模式,也需要这个二次确认)'
+        required: true
+        type: string
+        default: 'no'
+
+permissions:
+  contents: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      MY_OWNER: ${{ github.repository_owner }}
+      FORK: ${{ inputs.fork }}
+      TAG: ${{ inputs.tag }}
+      CONFIRM: ${{ inputs.confirm }}
+      RESTORE_TO_DEFAULT: ${{ inputs.restore_to_default }}
+    steps:
+      # =====================================================================
+      # Step 1: 校验输入
+      # =====================================================================
+      - name: Validate input
+        run: |
+          set -e
+          if [ -z "$FORK" ]; then
+            echo "❌ fork 不能为空"
+            exit 1
+          fi
+          echo "🔍 目标 fork: $MY_OWNER/$FORK"
+
+      - name: List backup tags
+        if: inputs.tag == ''
+        run: |
+          set -e
+          echo "📋 $MY_OWNER/$FORK 最近的 backup tag:"
+          gh api "repos/$MY_OWNER/$FORK/git/refs/tags" \
+            --jq -r '.[] | .ref' \
+            | sed 's|refs/tags/||' \
+            | grep '^backup/' \
+            | tail -20 || echo "(无 backup tag)"
+          echo ""
+          echo "💡 用法: 重新 trigger,tag 填上面列出的 tag 名"
+          exit 0
+
+      # =====================================================================
+      # Step 2: 安全确认 (任何模式都需要 confirm=yes)
+      # =====================================================================
+      - name: Confirm rollback
+        if: inputs.tag != ''
+        run: |
+          set -e
+          if [ "$CONFIRM" != "yes" ]; then
+            echo "❌ confirm 必须填 'yes',当前: '$CONFIRM'"
+            echo "💡 这是改 fork 内容的操作,需要明确确认"
+            exit 1
+          fi
+          echo "✅ 用户已确认 (restore_to_default=$RESTORE_TO_DEFAULT)"
+
+      # =====================================================================
+      # Step 3: 执行 rollback
+      # 默认 (restore_to_default=no): 建 restore-from-backup/{tag} 分支
+      # 可选 (restore_to_default=yes): 强推 default + 存 rollback/ tag 留底
+      # =====================================================================
+      - name: Restore via branch (default, safe)
+        if: inputs.tag != '' && inputs.restore_to_default == 'no'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -e
+
+          # 1. 拿 tag SHA
+          TAG_SHA=$(gh api "repos/$MY_OWNER/$FORK/git/refs/tags/$TAG" --jq '.object.sha // empty' 2>/dev/null)
+          if [ -z "$TAG_SHA" ]; then
+            echo "❌ 拿不到 tag '$TAG' 的 SHA (tag 不存在?)"
+            exit 1
+          fi
+          echo "📌 tag $TAG → ${TAG_SHA:0:7}"
+
+          # 2. 建 review 分支
+          REVIEW_BRANCH="restore-from-backup/${TAG}-$(date +%Y%m%d-%H%M%S)"
+          gh api -X POST "repos/$MY_OWNER/$FORK/git/refs" \
+            -f ref="refs/heads/$REVIEW_BRANCH" \
+            -f sha="$TAG_SHA" >/dev/null
+          echo "✅ review 分支已建: $REVIEW_BRANCH"
+          echo ""
+          echo "💡 下一步:"
+          echo "   - 在 Actions log 看不直观,推荐本地操作:"
+          echo "     git fetch origin $REVIEW_BRANCH"
+          echo "     git diff main origin/$REVIEW_BRANCH"
+          echo "   - 想合回 default: 开 PR ($REVIEW_BRANCH → main) 或手动 merge"
+          echo "   - 不想要: gh api -X DELETE repos/$MY_OWNER/$FORK/git/refs/heads/$REVIEW_BRANCH"
+
+      - name: Restore via force-push (destructive)
+        if: inputs.tag != '' && inputs.restore_to_default == 'yes'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -e
+
+          # 双重确认:restore_to_default=yes + confirm=yes 才执行
+          echo "⚠️  强推模式 (restore_to_default=yes)"
+
+          # 1. 拿 tag SHA
+          TAG_SHA=$(gh api "repos/$MY_OWNER/$FORK/git/refs/tags/$TAG" --jq '.object.sha // empty' 2>/dev/null)
+          if [ -z "$TAG_SHA" ]; then
+            echo "❌ 拿不到 tag '$TAG' 的 SHA (tag 不存在?)"
+            exit 1
+          fi
+          echo "📌 tag $TAG → ${TAG_SHA:0:7}"
+
+          # 2. 拿 fork 默认分支
+          DEFAULT_BRANCH=$(gh api "repos/$MY_OWNER/$FORK" --jq '.default_branch // "main"')
+          echo "🌿 fork 默认分支: $DEFAULT_BRANCH"
+
+          # 3. 强推前先存当前 SHA 到 rollback/ tag (留个"再回滚回去"的退路)
+          CURRENT_SHA=$(gh api "repos/$MY_OWNER/$FORK/git/ref/heads/$DEFAULT_BRANCH" --jq '.object.sha // empty' 2>/dev/null)
+          if [ -n "$CURRENT_SHA" ]; then
+            ROLLBACK_TAG="rollback/$(date +%Y%m%d-%H%M%S)-${CURRENT_SHA:0:7}"
+            gh api -X POST "repos/$MY_OWNER/$FORK/git/refs" \
+              -f ref="refs/tags/$ROLLBACK_TAG" \
+              -f sha="$CURRENT_SHA" >/dev/null 2>&1 && \
+              echo "💾 当前 SHA 已存 rollback tag: $ROLLBACK_TAG → ${CURRENT_SHA:0:7}" || \
+              echo "::warning::无法创建 rollback 前的 backup tag"
+          fi
+
+          # 4. 强推
+          echo ""
+          echo "⚠️  执行强推: $FORK/$DEFAULT_BRANCH → ${TAG_SHA:0:7} (from $TAG)"
+          PATCH_RESULT=$(gh api -X PATCH "repos/$MY_OWNER/$FORK/git/refs/heads/$DEFAULT_BRANCH" \
+            -f sha="$TAG_SHA" \
+            -f force=true 2>&1)
+          if echo "$PATCH_RESULT" | grep -q '"ref"'; then
+            echo "✅ 回滚成功: $FORK/$DEFAULT_BRANCH 现在指向 ${TAG_SHA:0:7}"
+            echo ""
+            echo "📜 提交信息:"
+            gh api "repos/$MY_OWNER/$FORK/git/commits/$TAG_SHA" --jq '"\(.[\"sha\"][0:7]) \(.message | split(\"\n\")[0])"'
+          else
+            echo "❌ 回滚失败: $PATCH_RESULT"
+            exit 1
+          fi
