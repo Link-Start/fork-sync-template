@@ -1,11 +1,11 @@
 {
   "forks": {
-    "": {
-      "last_result": "skip",
-      "last_ts": "2026-06-04T06:48:25.483Z",
-      "consecutive_failures": 0,
+    "proxy-runtime_byte-v-forge": {
+      "last_result": "fail",
+      "last_ts": "2026-06-04T07:03:06.956Z",
+      "consecutive_failures": 1,
       "last_alert_ts": null
     }
   },
-  "updated_at": "2026-06-04T06:48:29Z"
+  "updated_at": "2026-06-04T07:03:07Z"
 }
