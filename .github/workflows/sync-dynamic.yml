@@ -612,6 +612,7 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           # 把结构化 events 输出到主 log (Item 11),方便不下载 artifact 也能看到
+          # 同时生成 CSV 报告 (Item 12),用 actions/upload-artifact 上传留档
           echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📋 结构化事件日志 (events.jsonl)"
@@ -621,8 +622,22 @@ jobs:
             echo ""
             EVENT_COUNT=$(wc -l < "$RUNNER_TEMP/events.jsonl" | tr -d ' ')
             echo "📊 共 $EVENT_COUNT 条事件"
+
+            # 生成 CSV 报告 (Item 12)
+            # 预定义所有 log_event 调用的 k=v 字段,缺则空
+            CSV_KEYS="ts fork action result mode run_id upstream default_branch reason fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch"
+            # header
+            echo "$CSV_KEYS" | tr ' ' '\n' | jq -R '.' | jq -rs '@csv' > "$RUNNER_TEMP/events.csv"
+            # body
+            jq -r --arg keys "$CSV_KEYS" '
+              . as $event
+              | ($keys | split(" ")) as $k
+              | [ $k[] | $event[.] // "" ] | @csv
+            ' "$RUNNER_TEMP/events.jsonl" >> "$RUNNER_TEMP/events.csv"
+            CSV_LINES=$(($(wc -l < "$RUNNER_TEMP/events.csv") - 1))
+            echo "📊 CSV 报告: $CSV_LINES 条记录 → $RUNNER_TEMP/events.csv"
           else
-            echo "(无事件)"
+            echo "(无事件,跳过 CSV 生成)"
           fi
 
       # =====================================================================
@@ -766,3 +781,20 @@ jobs:
           else
             echo "::warning::webhook 发送失败 ($WEBHOOK_TYPE),但不影响 workflow"
           fi
+
+      # =====================================================================
+      # Step 5: 上传 artifact (Item 12: CSV + JSON 报告留档)
+      # if: always() 让失败也留档,方便事后排查
+      # 同一个 run 上传两个文件:events.jsonl (原始) + events.csv (易读)
+      # 留 30 天 (默认 90,这里 30 够用 + 节省 artifact 存储)
+      # =====================================================================
+      - name: Upload sync artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-sync-events
+          path: |
+            ${{ runner.temp }}/events.jsonl
+            ${{ runner.temp }}/events.csv
+          retention-days: 30
+          if-no-files-found: warn
