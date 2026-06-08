@@ -983,7 +983,7 @@ jobs:
           echo "$FORKS" | jq -r '.[] | @base64' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$1"' _ {}
 
           # 按原始 fork 顺序输出所有 log
-          echo "$FORKS" | jq -r '.name' | while read -r name; do
+          echo "$FORKS" | jq -r '.[].name' | while read -r name; do
             if [ -f "$LOG_DIR/$name.log" ]; then
               cat "$LOG_DIR/$name.log"
             fi
