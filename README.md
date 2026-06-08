@@ -136,22 +136,26 @@ fork-sync-template/
 
 ---
 
-## 三种排除方式 (按粒度从粗到细)
+## 手动触发筛选方式
 
-动态版 yml 支持 **3 种排除方式**,手动触发时可以组合使用:
+动态版 yml 支持手动触发时缩小同步范围,适合先单仓库测试再跑全量:
 
 | 方式 | 怎么用 | 匹配什么 | 适合 |
 |---|---|---|---|
+| `only_repos` (指定名) | 填 `lanhu-mcp_dsphper` 或 `Link-Start/lanhu-mcp_dsphper` | fork **仓库名**或 `owner/repo` 精确匹配 | 只跑一个或几个 fork 做测试 |
+| `upstream_owner_filter` (正向) | 填 `cv-cat` | 只保留**上游 owner** 是这个的 fork | 只想同步某个作者旗下的 fork |
 | `exclude_pattern` (关键字) | 填 `claude` | fork **仓库名**包含关键字 (大小写不敏感) | 一次性排除一类 (如所有 anthropic/claude 库) |
 | `exclude_repos` (指定名) | 填 `my-test,legacy-fork` | fork **仓库名**精确匹配列表中的任一 | 排除几个特定的 |
-| `upstream_owner_filter` (正向) | 填 `cv-cat` | 只保留**上游 owner** 是这个的 fork | 只想同步某个作者旗下的 fork |
 
 **示例** (手动触发时):
+- `only_repos=lanhu-mcp_dsphper` → 只同步这一个 fork,用于快速验证逻辑
+- `only_repos=Link-Start/lanhu-mcp_dsphper,Link-Start/freeCodeCamp-freeCodeCamp` → 只同步这两个 fork
+- 如果某个分支和 upstream 没有共同祖先,默认 `discard_local_changes=force` 会先建 `local-backup/*`,再执行等价 GitHub `Discard commits` 的强制同步
 - `exclude_pattern=claude` → 跳过 `claude-code`、`my-claude-fork`、`ClaudeTest`
 - `exclude_repos=spider-xhs-test,my-experiment` → 只跳过这两个特定的
-- 三个组合填: `upstream_owner_filter=cv-cat` + `exclude_pattern=test` + `exclude_repos=legacy-thing` → 只同步 cv-cat 旗下、名字不含 test、且不是 legacy-thing 的 fork
+- 组合填: `upstream_owner_filter=cv-cat` + `exclude_pattern=test` + `exclude_repos=legacy-thing` → 只同步 cv-cat 旗下、名字不含 test、且不是 legacy-thing 的 fork
 
-> 仓库自带的自动跳过(`.github/.no-sync` 文件)依然生效,跟上面三种独立。详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
+> 仓库自带的自动跳过(`.github/.no-sync` 文件)依然生效,跟上面这些筛选条件独立。详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
 
 ---
 

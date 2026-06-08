@@ -53,6 +53,10 @@ on:
         description: '要同步的 fork owner 列表 (逗号分隔,留空 = 自己;支持用户名和 org,自动判断)'
         required: false
         default: ''
+      only_repos:
+        description: '只同步这些 fork 仓库名,逗号分隔;支持 repo 或 owner/repo (留空 = 不限制,适合单仓库测试)'
+        required: false
+        default: ''
       exclude_pattern:
         description: '排除仓库名含这个 pattern 的 fork (留空 = 用默认,匹配的是 fork 仓库名,不是 README 或代码)'
         required: false
@@ -202,10 +206,37 @@ jobs:
               fi
               attempt=$((attempt + 1))
             done
+            if [ -n "${GH_API_ERROR_FILE:-}" ]; then
+              printf '%s\n' "$output" > "$GH_API_ERROR_FILE" 2>/dev/null || true
+            fi
             echo "  ❌ gh api 最终失败 (3 次都失败): $(printf '%s' "$output" | head -1)" >&2
             return 1
           }
           export -f gh_api_with_retry
+
+          gh_api_capture() {
+            local __out_var="$1" __err_var="$2"
+            shift 2
+            local output rc error_file stderr_file error_output
+            error_file=$(mktemp)
+            stderr_file=$(mktemp)
+            output=$(GH_API_ERROR_FILE="$error_file" gh_api_with_retry "$@" 2>"$stderr_file")
+            rc=$?
+            printf -v "$__out_var" '%s' "$output"
+            if [ "$rc" -ne 0 ]; then
+              if [ -s "$error_file" ]; then
+                error_output=$(cat "$error_file")
+              else
+                error_output=$(cat "$stderr_file")
+              fi
+              printf -v "$__err_var" '%s' "$error_output"
+            else
+              printf -v "$__err_var" '%s' ""
+            fi
+            rm -f "$error_file" "$stderr_file"
+            return "$rc"
+          }
+          export -f gh_api_capture
 
           gh_api_write() {
             if [ "${DRY_RUN:-false}" = "true" ]; then
@@ -215,6 +246,18 @@ jobs:
             gh_api_with_retry "$@"
           }
           export -f gh_api_write
+
+          gh_api_write_capture() {
+            local __out_var="$1" __err_var="$2"
+            shift 2
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              printf -v "$__out_var" '[DRY-RUN] gh api %s' "$*"
+              printf -v "$__err_var" '%s' ""
+              return 0
+            fi
+            gh_api_capture "$__out_var" "$__err_var" "$@"
+          }
+          export -f gh_api_write_capture
 
           log_event() {
             local fork="$1" action="$2" result="$3"
@@ -296,6 +339,8 @@ jobs:
           CONFIG_REPO: ${{ github.event.repository.name }}
           # 多 owner 支持 (Item 17):逗号分隔,留空 = 自己
           TARGET_OWNERS: ${{ inputs.target_owners }}
+          # 单仓库/少量仓库测试:逗号分隔,支持 repo 或 owner/repo
+          ONLY_REPOS: ${{ inputs.only_repos }}
         run: |
           set -e
           # 共享函数:gh_api_with_retry / gh_api_write / log_event
@@ -376,10 +421,29 @@ jobs:
             done < <(echo "$candidates" | jq -c '.[]') | jq -s '.'
           }
 
+          only_repo_candidates() {
+            echo "$ONLY_REPOS" | jq -R '
+              split(",")
+              | map(gsub("^ +| +$"; ""))
+              | map(select(length > 0))
+              | map(
+                  if contains("/") then
+                    split("/") | {fork_owner: .[0], name: .[1]}
+                  else
+                    {fork_owner: env.MY_OWNER, name: .}
+                  end
+                )
+            '
+          }
+
           # 收集 fork 列表:列表 API 只保证有 fork=true,不保证带 parent/source。
           # 所以先分页拿候选,再逐个 GET /repos/{owner}/{repo} 补齐 upstream。
           FORKS="[]"
-          if [ -z "$TARGET_OWNERS" ]; then
+          if [ -n "$ONLY_REPOS" ]; then
+            echo "🎯 only_repos 快速模式: 只查询指定 fork,不扫描全量账号 → $ONLY_REPOS"
+            CANDIDATES=$(only_repo_candidates)
+            FORKS=$(enrich_fork_candidates "$CANDIDATES")
+          elif [ -z "$TARGET_OWNERS" ]; then
             echo "🌐 默认 owner: $MY_OWNER"
             AUTH_CANDIDATES=$(list_authenticated_owner_fork_candidates)
             PUBLIC_CANDIDATES=$(list_named_owner_fork_candidates "$MY_OWNER" || true)
@@ -422,6 +486,11 @@ jobs:
           fi
 
           COUNT=$(echo "$FORKS" | jq length)
+          if [ -n "$ONLY_REPOS" ] && [ "$COUNT" -eq 0 ]; then
+            echo "::error::only_repos 没匹配到任何 fork: $ONLY_REPOS"
+            echo "  提示:填 fork 仓库名,例如 lanhu-mcp_dsphper; 多 owner 时也可填 Link-Start/lanhu-mcp_dsphper"
+            exit 1
+          fi
           echo "forks<<EOF" >> "$GITHUB_OUTPUT"
           echo "$FORKS" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
@@ -527,13 +596,134 @@ jobs:
             UPSTREAM_OWNER=$(echo "$fork_json" | jq -r '.parent_owner')
             UPSTREAM_REPO=$(echo "$fork_json" | jq -r '.parent_name')
             UPSTREAM_DEFAULT=$(echo "$fork_json" | jq -r '.parent_default_branch')
-            local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=()
+            local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=() FAILURE_DETAILS=()
+
+            first_json_line() {
+              awk 'match($0, /^\{.*\}/) {print substr($0, RSTART, RLENGTH); exit}' <<<"$1"
+            }
+
+            api_error_field() {
+              local raw="$1" field="$2" json
+              json=$(first_json_line "$raw")
+              if [ -n "$json" ]; then
+                jq -r --arg field "$field" '.[$field] // empty' <<<"$json" 2>/dev/null | head -1
+              fi
+            }
+
+            api_error_message() {
+              local raw="$1" message
+              message=$(api_error_field "$raw" "message")
+              if [ -z "$message" ]; then
+                message=$(sed -n 's/^gh: //p' <<<"$raw" | head -1)
+              fi
+              if [ -z "$message" ]; then
+                message=$(head -1 <<<"$raw")
+              fi
+              printf '%s' "$message" | tr '\r\n' ' ' | cut -c 1-500
+            }
+
+            api_error_hint() {
+              local context="$1" status="$2" message="$3"
+              case "$context:$status:$message" in
+                branches:404:*)
+                  printf '%s' "上游仓库分支列表不可访问; 常见原因: 上游仓库被删除、私有化、改名、空仓库或 token 无权限"
+                  ;;
+                upstream_sha:404:*)
+                  printf '%s' "上游分支当前不可读取; 常见原因: 分支已删除/重命名、分支名包含特殊路径导致 ref 查询失败、或 API 列表与 ref 查询之间发生变化"
+                  ;;
+                fork_sha:404:*)
+                  printf '%s' "fork 上没有这个分支; 如果后续创建失败,通常是分支名/SHA/权限问题"
+                  ;;
+                compare:404:*No\ common\ ancestor*)
+                  printf '%s' "fork 分支和 upstream 分支没有共同祖先; 常见原因: fork 分支是独立历史、被强制改写过、或不是从该 upstream 分支派生"
+                  ;;
+                compare:404:*)
+                  printf '%s' "GitHub compare 找不到可比较对象; 常见原因: 上游/fork 分支不存在、仓库不可访问、fork 关系异常或没有共同历史"
+                  ;;
+                compare:409:*)
+                  printf '%s' "GitHub compare 冲突/无法生成比较结果; 需要人工确认该分支历史"
+                  ;;
+                create_ref:422:*Reference\ already\ exists*)
+                  printf '%s' "目标分支已存在; 可能是并发运行或上一次运行刚创建"
+                  ;;
+                create_ref:422:*)
+                  printf '%s' "GitHub 拒绝创建分支; 常见原因: 分支名非法、SHA 不存在、仓库规则限制或参数校验失败"
+                  ;;
+                create_ref:403:*)
+                  printf '%s' "没有创建分支权限,或仓库规则禁止创建该 ref"
+                  ;;
+                update_ref:403:*|discard:403:*|merge_keep:403:*|merge_upstream:403:*)
+                  printf '%s' "没有更新分支权限,或分支保护/仓库规则阻止写入"
+                  ;;
+                update_ref:422:*|discard:422:*)
+                  printf '%s' "GitHub 拒绝强制更新 ref; 常见原因: 参数校验失败、分支保护、SHA 无效或仓库规则限制"
+                  ;;
+                merge_upstream:409:*|merge_keep:409:*)
+                  printf '%s' "merge-upstream 发生冲突,不能自动合并"
+                  ;;
+                *:404:*)
+                  printf '%s' "GitHub 返回 404; 通常是仓库/分支不存在、已删除/私有化、改名或 token 无权限"
+                  ;;
+                *:403:*)
+                  printf '%s' "GitHub 返回 403; 通常是 token 权限不足、分支保护、仓库规则或 API 限制"
+                  ;;
+                *:422:*)
+                  printf '%s' "GitHub 返回 422; 通常是请求参数无效、ref/SHA 不合法、分支已存在或仓库规则校验失败"
+                  ;;
+                *)
+                  printf '%s' "GitHub API 调用失败; 需要结合原始 message 判断"
+                  ;;
+              esac
+            }
+
+            record_failure() {
+              local branch="$1" reason="$2" context="${3:-}" api_path="${4:-}" api_error="${5:-}" event_mode="${6:-}"
+              local api_status api_message api_doc hint detail_json
+              api_status=$(api_error_field "$api_error" "status")
+              api_doc=$(api_error_field "$api_error" "documentation_url")
+              api_message=$(api_error_message "$api_error")
+              hint=$(api_error_hint "$context" "$api_status" "$api_message")
+
+              FAILED+=("$branch")
+              detail_json=$(jq -n -c \
+                --arg branch "$branch" \
+                --arg reason "$reason" \
+                --arg context "$context" \
+                --arg api_path "$api_path" \
+                --arg api_status "$api_status" \
+                --arg api_message "$api_message" \
+                --arg api_doc "$api_doc" \
+                --arg hint "$hint" \
+                --arg mode "$event_mode" \
+                '{branch: $branch, reason: $reason, context: $context, api_path: $api_path, api_status: $api_status, api_message: $api_message, api_doc: $api_doc, hint: $hint, mode: $mode}')
+              FAILURE_DETAILS+=("$detail_json")
+
+              echo "    详情: $hint"
+              if [ -n "$api_status" ] || [ -n "$api_message" ]; then
+                echo "    GitHub: HTTP ${api_status:-unknown} - ${api_message:-unknown}"
+              fi
+              log_event "$FORK_REPO" "sync_branch" "fail" \
+                branch="$branch" reason="$reason" context="$context" api_path="$api_path" \
+                api_status="$api_status" api_message="$api_message" hint="$hint" mode="$event_mode"
+            }
 
             write_fork_summary() {
               local result="$1"
               local reason="${2:-}"
+              local failure_details_json="[]" failure_summary=""
               if [ "${#FAILED[@]}" -gt 0 ]; then
                 result="fail"
+              fi
+              if [ "${#FAILURE_DETAILS[@]}" -gt 0 ]; then
+                failure_details_json=$(printf '%s\n' "${FAILURE_DETAILS[@]}" | jq -s '.')
+                failure_summary=$(printf '%s\n' "${FAILURE_DETAILS[0]}" | jq -r '
+                  .reason
+                  + (if .api_status != "" then " (HTTP " + .api_status + ")" else "" end)
+                  + (if .hint != "" then ": " + .hint else "" end)
+                ' | cut -c 1-300)
+              fi
+              if [ -z "$reason" ] && [ -n "$failure_summary" ]; then
+                reason="$failure_summary"
               fi
 
               echo ""
@@ -552,8 +742,9 @@ jobs:
                 --argjson failed "${#FAILED[@]}" \
                 --argjson skipped "${#SKIPPED[@]}" \
                 --argjson local_backup "${#LOCAL_BACKED_UP[@]}" \
+                --argjson failure_details "$failure_details_json" \
                 --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                '{name: $name, result: $result, reason: $reason, new: $new, synced: $synced, failed: $failed, skipped: $skipped, local_backup: $local_backup, ts: $ts}' \
+                '{name: $name, result: $result, reason: $reason, new: $new, synced: $synced, failed: $failed, skipped: $skipped, local_backup: $local_backup, failure_details: $failure_details, ts: $ts}' \
                 >> "$RUNNER_TEMP/summary.jsonl"
             }
 
@@ -719,34 +910,45 @@ jobs:
             fi
 
             # ----- 阶段 3: 遍历 upstream 分支,逐个同步 -----
-            local UPSTREAM_BRANCH_LIST
-            UPSTREAM_BRANCH_LIST=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches" \
-                                   --jq '.[] | .name' 2>/dev/null || true)
+            local UPSTREAM_BRANCH_LIST UPSTREAM_BRANCH_ERR UPSTREAM_BRANCH_API
+            UPSTREAM_BRANCH_API="repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches"
+            if ! gh_api_capture UPSTREAM_BRANCH_LIST UPSTREAM_BRANCH_ERR "$UPSTREAM_BRANCH_API" \
+                 --jq '.[] | .name'; then
+              UPSTREAM_BRANCH_LIST=""
+            fi
             if [ -z "$UPSTREAM_BRANCH_LIST" ]; then
               echo "    ❌ 拿不到 upstream 分支列表"
-              FAILED+=("__branches__")
-              log_event "$FORK_REPO" "sync_branch" "fail" reason="拿不到 upstream 分支列表"
-              write_fork_summary "fail" "拿不到 upstream 分支列表"
+              record_failure "__branches__" "拿不到 upstream 分支列表" "branches" "$UPSTREAM_BRANCH_API" "$UPSTREAM_BRANCH_ERR" "auto"
+              write_fork_summary "fail"
               return 0
             fi
 
             for branch in $UPSTREAM_BRANCH_LIST; do
               echo "  ━━━ $branch ━━━"
 
-              local UPSTREAM_SHA FORK_SHA
-              UPSTREAM_SHA=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch" \
-                             --jq '.object.sha' 2>/dev/null || echo "")
+              local UPSTREAM_SHA FORK_SHA UPSTREAM_SHA_ERR UPSTREAM_SHA_API
+              UPSTREAM_SHA_API="repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/git/ref/heads/$branch"
+              if ! gh_api_capture UPSTREAM_SHA UPSTREAM_SHA_ERR "$UPSTREAM_SHA_API" \
+                   --jq '.object.sha'; then
+                UPSTREAM_SHA=""
+              fi
               if [ -z "$UPSTREAM_SHA" ]; then
                 echo "    ❌ 拿不到 upstream SHA"
-                FAILED+=("$branch")
+                record_failure "$branch" "拿不到 upstream SHA" "upstream_sha" "$UPSTREAM_SHA_API" "$UPSTREAM_SHA_ERR" "auto"
                 continue
               fi
 
-              FORK_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch" \
-                         --jq '.object.sha' 2>/dev/null || echo "")
+              local FORK_SHA_ERR FORK_SHA_API
+              FORK_SHA_API="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
+              if ! gh_api_capture FORK_SHA FORK_SHA_ERR "$FORK_SHA_API" \
+                   --jq '.object.sha'; then
+                FORK_SHA=""
+              fi
 
               if [ -z "$FORK_SHA" ]; then
-                if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
+                local CREATE_REF_OUT CREATE_REF_ERR CREATE_REF_API
+                CREATE_REF_API="repos/$FORK_OWNER/$FORK_REPO/git/refs"
+                if gh_api_write_capture CREATE_REF_OUT CREATE_REF_ERR -X POST "$CREATE_REF_API" \
                      -f ref="refs/heads/$branch" \
                      -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
                   echo "    🆕 新建 → ${UPSTREAM_SHA:0:7}"
@@ -755,16 +957,17 @@ jobs:
                   log_event "$FORK_REPO" "sync_branch" "new" branch="$branch" upstream_sha="${UPSTREAM_SHA:0:7}"
                 else
                   echo "    ❌ 新建失败"
-                  FAILED+=("$branch")
-                  log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" reason="新建失败"
+                  record_failure "$branch" "新建失败" "create_ref" "$CREATE_REF_API" "$CREATE_REF_ERR" "auto"
                 fi
                 continue
               fi
 
-              local COMPARE_JSON STATUS AHEAD BEHIND
-              COMPARE_JSON=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}" \
-                             --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}' \
-                             2>/dev/null || echo '{"status":"error"}')
+              local COMPARE_JSON STATUS AHEAD BEHIND COMPARE_ERR COMPARE_API
+              COMPARE_API="repos/$FORK_OWNER/$FORK_REPO/compare/${UPSTREAM_OWNER}:${UPSTREAM_REPO}:${branch}...${branch}"
+              if ! gh_api_capture COMPARE_JSON COMPARE_ERR "$COMPARE_API" \
+                   --jq '{status: .status, ahead: .ahead_by, behind: .behind_by}'; then
+                COMPARE_JSON='{"status":"error"}'
+              fi
               STATUS=$(echo "$COMPARE_JSON" | jq -r '.status // "error"')
               AHEAD=$(echo "$COMPARE_JSON" | jq -r '.ahead // 0')
               BEHIND=$(echo "$COMPARE_JSON" | jq -r '.behind // 0')
@@ -805,8 +1008,10 @@ jobs:
                 fi
 
                 if [ "$SHOULD_CREATE_BACKUP" = "true" ]; then
+                  local BACKUP_REF_OUT BACKUP_REF_ERR BACKUP_REF_API
                   BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
-                  if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
+                  BACKUP_REF_API="repos/$FORK_OWNER/$FORK_REPO/git/refs"
+                  if gh_api_write_capture BACKUP_REF_OUT BACKUP_REF_ERR -X POST "$BACKUP_REF_API" \
                        -f ref="refs/heads/$BACKUP_BRANCH" \
                        -f sha="$FORK_SHA" >/dev/null 2>&1; then
                     echo "    📦 本地修改备份: $BACKUP_BRANCH (含 $AHEAD 个 commit)"
@@ -815,13 +1020,12 @@ jobs:
                     log_event "$FORK_REPO" "local_backup" "ok" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD" behind="$BEHIND"
                   else
                     echo "    🛑 备份分支创建失败,跳过该分支同步以避免丢失本地修改"
-                    log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD" behind="$BEHIND" reason="备份分支创建失败"
+                    log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD" behind="$BEHIND" reason="备份分支创建失败" api_message="$(api_error_message "$BACKUP_REF_ERR")" api_status="$(api_error_field "$BACKUP_REF_ERR" "status")"
                   fi
                 fi
 
                 if [ "$BACKUP_READY" != "true" ]; then
-                  FAILED+=("$branch")
-                  log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" ahead="$AHEAD" behind="$BEHIND" reason="本地修改备份未完成"
+                  record_failure "$branch" "本地修改备份未完成" "backup_ref" "${BACKUP_REF_API:-}" "${BACKUP_REF_ERR:-}" "auto"
                   continue
                 fi
               fi
@@ -834,9 +1038,10 @@ jobs:
                 behind)
                   if [ "$SYNC_MODE" = "pr" ]; then
                     # PR 模式: 建 sync 分支 + 开 PR,让用户审
-                    local PR_BRANCH PR_NUM
+                    local PR_BRANCH PR_NUM PR_REF_OUT PR_REF_ERR PR_REF_API
                     PR_BRANCH="sync-upstream/${branch}-$(date +%Y%m%d-%H%M%S)"
-                    if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
+                    PR_REF_API="repos/$FORK_OWNER/$FORK_REPO/git/refs"
+                    if gh_api_write_capture PR_REF_OUT PR_REF_ERR -X POST "$PR_REF_API" \
                          -f ref="refs/heads/$PR_BRANCH" \
                          -f sha="$UPSTREAM_SHA" >/dev/null 2>&1; then
                       local PR_JSON
@@ -852,26 +1057,28 @@ jobs:
                       log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="pr" behind="$BEHIND" pr="$PR_NUM"
                     else
                       echo "    ❌ PR 模式: sync 分支创建失败"
-                      FAILED+=("$branch")
-                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="pr" reason="sync 分支创建失败"
+                      record_failure "$branch" "sync 分支创建失败" "create_ref" "$PR_REF_API" "$PR_REF_ERR" "pr"
                     fi
                   else
                     # auto 模式: 直接 merge-upstream,失败兜底 PATCH
-                    if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/merge-upstream" \
+                    local MERGE_OUT MERGE_ERR MERGE_API PATCH_OUT PATCH_ERR PATCH_API
+                    MERGE_API="repos/$FORK_OWNER/$FORK_REPO/merge-upstream"
+                    if gh_api_write_capture MERGE_OUT MERGE_ERR -X POST "$MERGE_API" \
                          -f branch="$branch" >/dev/null 2>&1; then
                       echo "    ⏪ 落后 $BEHIND → merge-upstream 快进"
                       SYNCED+=("$branch")
                       log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="merge" behind="$BEHIND"
                     else
-                      if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                      PATCH_API="repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch"
+                      if gh_api_write_capture PATCH_OUT PATCH_ERR -X PATCH "$PATCH_API" \
                            -f sha="$UPSTREAM_SHA" -F force=true >/dev/null 2>&1; then
                         echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
                         SYNCED+=("$branch")
                         log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="patch" behind="$BEHIND"
                       else
                         echo "    ❌ merge + PATCH 都失败"
-                        FAILED+=("$branch")
-                        log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="auto" reason="merge + PATCH 都失败"
+                        record_failure "$branch" "merge-upstream 和 PATCH 兜底都失败" "update_ref" "$PATCH_API" "$PATCH_ERR" "auto"
+                        log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="auto" reason="merge-upstream 原始错误" context="merge_upstream" api_path="$MERGE_API" api_status="$(api_error_field "$MERGE_ERR" "status")" api_message="$(api_error_message "$MERGE_ERR")" hint="$(api_error_hint "merge_upstream" "$(api_error_field "$MERGE_ERR" "status")" "$(api_error_message "$MERGE_ERR")")"
                       fi
                     fi
                   fi
@@ -879,43 +1086,95 @@ jobs:
                 ahead|diverged)
                   if [ "$DISCARD_LOCAL_CHANGES" = "force" ]; then
                     # 等价于 GitHub 网页 Sync fork 里的 Discard commits: ref 必须指向 upstream SHA。
-                    local VERIFY_SHA
-                    if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                    local VERIFY_SHA DISCARD_OUT DISCARD_ERR DISCARD_API VERIFY_ERR VERIFY_API
+                    DISCARD_API="repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch"
+                    if gh_api_write_capture DISCARD_OUT DISCARD_ERR -X PATCH "$DISCARD_API" \
                          -f sha="$UPSTREAM_SHA" -F force=true >/dev/null; then
-                      VERIFY_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch" \
-                                   --jq '.object.sha' 2>/dev/null || echo "")
+                      VERIFY_API="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
+                      if ! gh_api_capture VERIFY_SHA VERIFY_ERR "$VERIFY_API" \
+                           --jq '.object.sha'; then
+                        VERIFY_SHA=""
+                      fi
                       if [ "$VERIFY_SHA" = "$UPSTREAM_SHA" ]; then
                         echo "    ⏩ Discard commits: 丢弃 $AHEAD + 同步 $BEHIND → ${UPSTREAM_SHA:0:7}"
                         SYNCED+=("$branch")
                         log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="discard_commits" ahead="$AHEAD" behind="$BEHIND" upstream_sha="${UPSTREAM_SHA:0:7}"
                       else
                         echo "    ❌ Discard commits 校验失败: fork=${VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}"
-                        FAILED+=("$branch")
-                        log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="discard_commits" reason="同步后 SHA 不一致" ahead="$AHEAD" behind="$BEHIND"
+                        if [ -n "$VERIFY_ERR" ]; then
+                          record_failure "$branch" "Discard commits 后校验失败" "verify_ref" "$VERIFY_API" "$VERIFY_ERR" "discard_commits"
+                        else
+                          record_failure "$branch" "同步后 SHA 不一致: fork=${VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}" "verify_ref" "$VERIFY_API" "" "discard_commits"
+                        fi
                       fi
                     else
                       echo "    ❌ Discard commits 失败"
-                      FAILED+=("$branch")
-                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="discard_commits" reason="PATCH force update 失败" ahead="$AHEAD" behind="$BEHIND"
+                      record_failure "$branch" "PATCH force update 失败" "discard" "$DISCARD_API" "$DISCARD_ERR" "discard_commits"
                     fi
                   else
                     # keep 模式: 去重备份 + 用 merge-upstream 合并上游更新，保留本地改动
-                    if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/merge-upstream" \
+                    local KEEP_MERGE_OUT KEEP_MERGE_ERR KEEP_MERGE_API
+                    KEEP_MERGE_API="repos/$FORK_OWNER/$FORK_REPO/merge-upstream"
+                    if gh_api_write_capture KEEP_MERGE_OUT KEEP_MERGE_ERR -X POST "$KEEP_MERGE_API" \
                          -f branch="$branch" >/dev/null 2>&1; then
                       echo "    🔀 保留本地 $AHEAD commit，merge upstream $BEHIND commit → ${UPSTREAM_SHA:0:7}"
                       SYNCED+=("$branch")
                       log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="keep" ahead="$AHEAD" behind="$BEHIND"
                     else
                       echo "    ❌ merge-upstream 失败"
-                      FAILED+=("$branch")
-                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="keep" reason="merge-upstream 失败"
+                      record_failure "$branch" "merge-upstream 失败" "merge_keep" "$KEEP_MERGE_API" "$KEEP_MERGE_ERR" "keep"
                     fi
                   fi
                   ;;
                 *)
                   echo "    ⚠️ compare 异常 (status=$STATUS)"
-                  FAILED+=("$branch")
-                  log_event "$FORK_REPO" "sync_branch" "error" branch="$branch" status="$STATUS"
+                  if [ "$DISCARD_LOCAL_CHANGES" = "force" ] && \
+                     [ "$(api_error_field "$COMPARE_ERR" "status")" = "404" ] && \
+                     printf '%s' "$(api_error_message "$COMPARE_ERR")" | grep -Fq 'No common ancestor'; then
+                    echo "    ⚠️ 分支无共同祖先,按 Discard commits 处理"
+                    local ORPHAN_BACKUP_BRANCH ORPHAN_BACKUP_OUT ORPHAN_BACKUP_ERR ORPHAN_BACKUP_API
+                    local ORPHAN_DISCARD_OUT ORPHAN_DISCARD_ERR ORPHAN_DISCARD_API ORPHAN_VERIFY_SHA ORPHAN_VERIFY_ERR ORPHAN_VERIFY_API
+                    ORPHAN_BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
+                    ORPHAN_BACKUP_API="repos/$FORK_OWNER/$FORK_REPO/git/refs"
+                    if gh_api_write_capture ORPHAN_BACKUP_OUT ORPHAN_BACKUP_ERR -X POST "$ORPHAN_BACKUP_API" \
+                         -f ref="refs/heads/$ORPHAN_BACKUP_BRANCH" \
+                         -f sha="$FORK_SHA" >/dev/null 2>&1; then
+                      echo "    📦 无共同祖先备份: $ORPHAN_BACKUP_BRANCH"
+                      LOCAL_BACKED_UP+=("$branch:$ORPHAN_BACKUP_BRANCH")
+                      log_event "$FORK_REPO" "local_backup" "ok" branch="$branch" backup_branch="$ORPHAN_BACKUP_BRANCH" reason="无共同祖先备份"
+
+                      ORPHAN_DISCARD_API="repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch"
+                      if gh_api_write_capture ORPHAN_DISCARD_OUT ORPHAN_DISCARD_ERR -X PATCH "$ORPHAN_DISCARD_API" \
+                           -f sha="$UPSTREAM_SHA" -F force=true >/dev/null; then
+                        ORPHAN_VERIFY_API="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
+                        if ! gh_api_capture ORPHAN_VERIFY_SHA ORPHAN_VERIFY_ERR "$ORPHAN_VERIFY_API" \
+                             --jq '.object.sha'; then
+                          ORPHAN_VERIFY_SHA=""
+                        fi
+                        if [ "$ORPHAN_VERIFY_SHA" = "$UPSTREAM_SHA" ]; then
+                          echo "    ⏩ Discard commits: 无共同祖先 → ${UPSTREAM_SHA:0:7}"
+                          SYNCED+=("$branch")
+                          log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="discard_no_common_ancestor" upstream_sha="${UPSTREAM_SHA:0:7}" backup_branch="$ORPHAN_BACKUP_BRANCH"
+                        else
+                          echo "    ❌ Discard commits 校验失败: fork=${ORPHAN_VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}"
+                          if [ -n "$ORPHAN_VERIFY_ERR" ]; then
+                            record_failure "$branch" "无共同祖先 Discard 后校验失败" "verify_ref" "$ORPHAN_VERIFY_API" "$ORPHAN_VERIFY_ERR" "discard_no_common_ancestor"
+                          else
+                            record_failure "$branch" "无共同祖先同步后 SHA 不一致: fork=${ORPHAN_VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}" "verify_ref" "$ORPHAN_VERIFY_API" "" "discard_no_common_ancestor"
+                          fi
+                        fi
+                      else
+                        echo "    ❌ 无共同祖先 Discard commits 失败"
+                        record_failure "$branch" "无共同祖先 PATCH force update 失败" "discard" "$ORPHAN_DISCARD_API" "$ORPHAN_DISCARD_ERR" "discard_no_common_ancestor"
+                      fi
+                    else
+                      echo "    🛑 无共同祖先备份分支创建失败,跳过该分支同步"
+                      log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" backup_branch="$ORPHAN_BACKUP_BRANCH" reason="无共同祖先备份分支创建失败" api_message="$(api_error_message "$ORPHAN_BACKUP_ERR")" api_status="$(api_error_field "$ORPHAN_BACKUP_ERR" "status")"
+                      record_failure "$branch" "无共同祖先备份未完成" "backup_ref" "$ORPHAN_BACKUP_API" "$ORPHAN_BACKUP_ERR" "discard_no_common_ancestor"
+                    fi
+                  else
+                    record_failure "$branch" "compare 异常" "compare" "$COMPARE_API" "$COMPARE_ERR" "auto"
+                  fi
                   ;;
               esac
             done
@@ -1002,7 +1261,7 @@ jobs:
 
             # 生成 CSV 报告 (Item 12)
             # 预定义所有 log_event 调用的 k=v 字段,缺则空
-            CSV_KEYS="ts fork action result mode run_id upstream default_branch reason fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch"
+            CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch"
             # header
             echo "$CSV_KEYS" | tr ' ' '\n' | jq -R '.' | jq -rs '@csv' > "$RUNNER_TEMP/events.csv"
             # body
@@ -1231,8 +1490,18 @@ jobs:
           # YAML literal block 不支持跨行字符串拼接,所以全在一个 printf -v 里完成
           ISSUE_TITLE="🤖 Fork Sync Report"
           DETAIL_ROWS=$(echo "$SUMMARY_JSON" | jq -r '.[] | "| \(.name) | \(.result // "ok") | \(.reason // "") | \(.new) | \(.synced) | \(.failed) | \(.skipped) | \(.local_backup) |"')
-          printf -v ISSUE_BODY "## 同步汇总\n\n- **运行时间**: %s (UTC)\n- **同步 fork 数**: %s\n- 🆕 新建分支: **%s**\n- ✅ 已同步: **%s**\n- ❌ 失败: **%s**\n- ⏭️ 跳过: **%s**\n- 📦 本地修改备份: **%s**\n\n### 详情\n\n| Fork | Result | Reason | 🆕 | ✅ | ❌ | ⏭️ | 📦 |\n|---|---|---|---|---|---|---|---|\n%s" \
-            "$RUN_TS" "$TOTAL" "$TOTAL_NEW" "$TOTAL_SYNCED" "$TOTAL_FAILED" "$TOTAL_SKIPPED" "$TOTAL_BACKUP" "$DETAIL_ROWS"
+          FAILURE_ROWS=$(echo "$SUMMARY_JSON" | jq -r '
+            def clean:
+              tostring
+              | gsub("[\r\n|]"; " ")
+              | if length > 240 then .[0:237] + "..." else . end;
+            [ .[] as $fork
+              | ($fork.failure_details // [])[]?
+              | "| \($fork.name | clean) | \(.branch | clean) | \(.reason | clean) | \(.hint | clean) | HTTP \((.api_status // "") | clean): \((.api_message // "") | clean) | \(.api_path | clean) |"
+            ] | if length == 0 then "| - | - | - | - | - | - |" else .[] end
+          ')
+          printf -v ISSUE_BODY "## 同步汇总\n\n- **运行时间**: %s (UTC)\n- **同步 fork 数**: %s\n- 🆕 新建分支: **%s**\n- ✅ 已同步: **%s**\n- ❌ 失败: **%s**\n- ⏭️ 跳过: **%s**\n- 📦 本地修改备份: **%s**\n\n### 详情\n\n| Fork | Result | Reason | 🆕 | ✅ | ❌ | ⏭️ | 📦 |\n|---|---|---|---|---|---|---|---|\n%s\n\n### 失败详情\n\n| Fork | Branch | Reason | Meaning | GitHub | API |\n|---|---|---|---|---|---|\n%s" \
+            "$RUN_TS" "$TOTAL" "$TOTAL_NEW" "$TOTAL_SYNCED" "$TOTAL_FAILED" "$TOTAL_SKIPPED" "$TOTAL_BACKUP" "$DETAIL_ROWS" "$FAILURE_ROWS"
 
           # 找已有 issue
           EXISTING=$(gh_api_with_retry "repos/$MY_OWNER/${{ github.event.repository.name }}/issues?state=all&labels=&per_page=100" \
