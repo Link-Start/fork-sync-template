@@ -6,10 +6,18 @@
 
 | 文件 | 用途 |
 |---|---|
+| `scripts/read-config.sh` | 读取 `.github/sync-config.yml`,把配置覆盖写入后续 workflow 环境 |
+| `scripts/discover-forks.sh` | 动态发现 fork,支持 `only_repos` 单仓库测试、多 owner、排除列表和 upstream 元数据补齐 |
+| `scripts/sync-each-fork.sh` | 并发同步编排、结构化事件日志、CSV/artifact 状态生成 |
+| `scripts/fork-worker.sh` | 单个 fork 的分支同步、备份、discard/merge、保护性 skip 主流程 |
+| `scripts/detect-drift.sh` | 连续失败 drift 检测、告警 issue、`workflow-state` 状态分支写回 |
+| `scripts/post-issue-summary.sh` | 汇总 `summary.jsonl` 并创建/更新固定同步报告 issue |
+| `scripts/send-webhook.sh` | 基于同步汇总发送 Slack / 钉钉 / generic webhook 通知 |
 | `scripts/github-api.sh` | `gh api` 重试、错误字段解析、错误 hint、upstream 仓库/分支探测 |
 | `scripts/git-cli.sh` | 临时 git 仓库初始化、fetch ref、merge-base、patch-id 签名比较 |
+| `scripts/common.sh` | 通用结构化事件日志函数 |
 
-workflow 会 checkout 当前配置仓库并 source `scripts/` 下的脚本;目标 fork 仍然不 checkout、不 git push。`scripts/` 是运行时逻辑和本地排障共用的实现。
+workflow 会 checkout 当前配置仓库并执行 `scripts/` 下的脚本;目标 fork 仍然不 checkout、不 git push。`scripts/` 是运行时逻辑和本地排障共用的实现。
 
 本地探测 upstream 可访问性示例:
 

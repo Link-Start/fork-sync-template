@@ -127,9 +127,14 @@ fork-sync-template/
 │   ├── sync-dynamic.yml              # 通用模板: 动态发现版 (同步所有 fork)
 │   └── sync-static.yml               # 通用模板: 静态 matrix 版 (要手写 fork 列表)
 ├── scripts/                           # 动态 workflow 运行脚本和 helper
+│   ├── read-config.sh                 # 读取 .github/sync-config.yml 覆盖配置
+│   ├── discover-forks.sh              # 动态发现 fork 并补齐 upstream 元数据
 │   ├── sync-each-fork.sh              # 并发同步编排
 │   ├── fork-worker.sh                 # 单 fork 同步主流程
-│   ├── github-api.sh                  # gh api 重试和错误解析
+│   ├── detect-drift.sh                # 连续失败 drift 检测和状态写回
+│   ├── post-issue-summary.sh          # 同步结果 issue 汇总
+│   ├── send-webhook.sh                # Slack / 钉钉 / 通用 webhook 通知
+│   ├── github-api.sh                  # gh api 重试、错误解析、upstream 探测
 │   ├── git-cli.sh                     # git 签名比较 helper
 │   └── common.sh                      # 通用日志函数
 ├── docs/                              # 10 个独立文档

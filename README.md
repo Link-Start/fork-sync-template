@@ -38,9 +38,17 @@ fork-sync-template/
 ├── examples/                          # 两种风格的通用模板 (fork 后不会被自动跑)
 │   ├── sync-dynamic.yml              # 通用动态发现 (排除 pattern 为空,同步所有 fork)
 │   └── sync-static.yml               # 通用静态 matrix (需要手写 fork 列表)
-├── scripts/                           # API / git helper 参考实现,方便复用和排障
+├── scripts/                           # 动态 workflow 运行脚本和 helper
+│   ├── read-config.sh                 # 读取 .github/sync-config.yml 覆盖配置
+│   ├── discover-forks.sh              # 动态发现 fork 并补齐 upstream 元数据
+│   ├── sync-each-fork.sh              # 并发同步编排
+│   ├── fork-worker.sh                 # 单 fork 同步主流程
+│   ├── detect-drift.sh                # 连续失败 drift 检测和状态写回
+│   ├── post-issue-summary.sh          # 同步结果 issue 汇总
+│   ├── send-webhook.sh                # Slack / 钉钉 / 通用 webhook 通知
 │   ├── github-api.sh                  # gh api 重试、错误解析、upstream 探测
-│   └── git-cli.sh                     # git fetch / merge-base / patch-id 签名方法
+│   ├── git-cli.sh                     # git fetch / merge-base / patch-id 签名方法
+│   └── common.sh                      # 通用结构化事件日志
 ├── docs/                              # 10 个独立文档
 │   ├── 01-architecture.md
 │   ├── 02-setup.md
@@ -80,7 +88,7 @@ fork-sync-template/
 2. **用 `examples/sync-dynamic.yml` 替换默认 yml**:
    - 进 `.github/workflows/`,删掉 `sync-dynamic.yml`
    - 把 `examples/sync-dynamic.yml` 复制/移动到 `.github/workflows/sync-dynamic.yml`
-3. **保留 `scripts/` 目录**: 动态 workflow 会 checkout 当前配置仓库并执行 `scripts/sync-each-fork.sh`
+3. **保留 `scripts/` 目录**: 动态 workflow 会 checkout 当前配置仓库并执行 `scripts/*.sh`
 4. **开写权限 + 开定时任务** (跟方式 1 的 2/3 步一样)
 5. 完事。yml 会同步你名下**所有** fork (无排除)。
 
