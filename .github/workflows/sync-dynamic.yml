@@ -5,7 +5,7 @@
 # =============================================================================
 # 适用: 自动同步你名下指定 fork 到上游 (排除 claude 相关库)
 # 风格: 动态发现 (auto-discover) + 名称模式排除
-# 优势: 纯 API 调用,秒级完成,自动备份,智能判断 ahead/behind
+# 优势: GitHub CLI/API 调用,无需 checkout,自动备份,智能判断 ahead/behind
 #
 # 跟 examples/sync-dynamic.yml 的区别:
 #   - examples/sync-dynamic.yml: 通用模板,默认同步所有 fork
@@ -142,7 +142,7 @@ jobs:
       # 留空 = 不豁免任何 fork
       DEFAULT_SIZE_CHECK_EXEMPT: ''
       # 日常使用配置: upstream 有新增且 fork 有本地提交时的处理方式
-      # force = 去重备份本地修改后,force push 和 upstream 完全一致 (默认)
+      # force = 去重备份本地修改后,执行 GitHub Discard commits,和 upstream 完全一致 (默认)
       # keep  = 去重备份本地修改后,使用 merge-upstream 合并上游更新
       # 纯 ahead 且 upstream 无新增时跳过,不备份也不写分支
       DEFAULT_DISCARD_LOCAL_CHANGES: 'force'
@@ -158,27 +158,89 @@ jobs:
           cat > "$RUNNER_TEMP/sync-lib.sh" <<'SYNC_LIB'
           #!/usr/bin/env bash
 
+          wait_for_core_rate_limit() {
+            local info remaining reset limit now wait reset_human
+            info=$(gh api rate_limit \
+              --jq '{remaining: .resources.core.remaining, reset: .resources.core.reset, limit: .resources.core.limit}' \
+              2>/dev/null || echo '{}')
+            remaining=$(echo "$info" | jq -r '.remaining // 9999')
+            reset=$(echo "$info" | jq -r '.reset // 0')
+            limit=$(echo "$info" | jq -r '.limit // 5000')
+            if [ "$remaining" -le 0 ] 2>/dev/null; then
+              now=$(date +%s)
+              wait=$((reset - now + 10))
+              if [ "$wait" -gt 0 ] && [ "$wait" -lt 3700 ]; then
+                reset_human=$(date -d "@$reset" '+%H:%M:%S' 2>/dev/null || date -r "$reset" '+%H:%M:%S')
+                echo "  ⏸️ GitHub API rate limit 已用尽 ($remaining/$limit),等待 ${wait}s 到 $reset_human UTC" >&2
+                sleep "$wait"
+                return 0
+              fi
+            fi
+            return 1
+          }
+          export -f wait_for_core_rate_limit
+
           gh_api_with_retry() {
             local max_attempts=3
             local attempt=1
             local delay=1
-            local output
+            local output rc
             while [ "$attempt" -le "$max_attempts" ]; do
-              if output=$(gh api "$@" 2>/dev/null); then
+              output=$(gh api "$@" 2>&1)
+              rc=$?
+              if [ "$rc" -eq 0 ]; then
                 echo "$output"
                 return 0
               fi
+              if printf '%s' "$output" | grep -Eiq 'rate limit|API rate limit exceeded'; then
+                wait_for_core_rate_limit && continue
+              fi
               if [ "$attempt" -lt "$max_attempts" ]; then
-                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试" >&2
+                echo "  ⚠️ gh api 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试: $(printf '%s' "$output" | head -1)" >&2
                 sleep "$delay"
                 delay=$((delay * 2))
               fi
               attempt=$((attempt + 1))
             done
-            echo "  ❌ gh api 最终失败 (3 次都失败)" >&2
+            echo "  ❌ gh api 最终失败 (3 次都失败): $(printf '%s' "$output" | head -1)" >&2
             return 1
           }
           export -f gh_api_with_retry
+
+          gh_repo_sync_force() {
+            local destination="$1"
+            local source="$2"
+            local branch="$3"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "[DRY-RUN] gh repo sync $destination --source $source --branch $branch --force"
+              return 0
+            fi
+
+            local max_attempts=3
+            local attempt=1
+            local delay=1
+            local output rc
+            while [ "$attempt" -le "$max_attempts" ]; do
+              output=$(gh repo sync "$destination" --source "$source" --branch "$branch" --force 2>&1)
+              rc=$?
+              if [ "$rc" -eq 0 ]; then
+                [ -n "$output" ] && echo "$output"
+                return 0
+              fi
+              if printf '%s' "$output" | grep -Eiq 'rate limit|API rate limit exceeded'; then
+                wait_for_core_rate_limit && continue
+              fi
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "  ⚠️ gh repo sync --force 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试: $(printf '%s' "$output" | head -1)" >&2
+                sleep "$delay"
+                delay=$((delay * 2))
+              fi
+              attempt=$((attempt + 1))
+            done
+            echo "$output" >&2
+            return 1
+          }
+          export -f gh_repo_sync_force
 
           gh_api_write() {
             if [ "${DRY_RUN:-false}" = "true" ]; then
@@ -851,16 +913,34 @@ jobs:
                   ;;
                 ahead|diverged)
                   if [ "$DISCARD_LOCAL_CHANGES" = "force" ]; then
-                    # force 模式: 去重备份 + force push 丢弃本地修改
-                    if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
-                         -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
-                      echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
-                      SYNCED+=("$branch")
-                      log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="force" ahead="$AHEAD" behind="$BEHIND"
+                    # 等价于 GitHub 网页 Sync fork 里的 Discard commits: hard reset 到 upstream。
+                    local SYNC_OK=false VERIFY_SHA
+                    if gh_repo_sync_force "$FORK_OWNER/$FORK_REPO" "$UPSTREAM_OWNER/$UPSTREAM_REPO" "$branch" >/dev/null; then
+                      SYNC_OK=true
                     else
-                      echo "    ❌ PATCH 失败"
+                      echo "    ⚠️ gh repo sync --force 失败,改用 git ref force update 兜底"
+                      if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                           -f sha="$UPSTREAM_SHA" -f force=true >/dev/null; then
+                        SYNC_OK=true
+                      fi
+                    fi
+
+                    if [ "$SYNC_OK" = "true" ]; then
+                      VERIFY_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch" \
+                                   --jq '.object.sha' 2>/dev/null || echo "")
+                      if [ "$VERIFY_SHA" = "$UPSTREAM_SHA" ]; then
+                        echo "    ⏩ Discard commits: 丢弃 $AHEAD + 同步 $BEHIND → ${UPSTREAM_SHA:0:7}"
+                        SYNCED+=("$branch")
+                        log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="discard_commits" ahead="$AHEAD" behind="$BEHIND" upstream_sha="${UPSTREAM_SHA:0:7}"
+                      else
+                        echo "    ❌ Discard commits 校验失败: fork=${VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}"
+                        FAILED+=("$branch")
+                        log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="discard_commits" reason="同步后 SHA 不一致" ahead="$AHEAD" behind="$BEHIND"
+                      fi
+                    else
+                      echo "    ❌ Discard commits 失败"
                       FAILED+=("$branch")
-                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="force" reason="PATCH 失败"
+                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="discard_commits" reason="gh repo sync --force 和 PATCH 都失败" ahead="$AHEAD" behind="$BEHIND"
                     fi
                   else
                     # keep 模式: 去重备份 + 用 merge-upstream 合并上游更新，保留本地改动

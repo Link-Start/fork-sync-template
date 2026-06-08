@@ -2,7 +2,7 @@
 
 ## 核心 API 端点说明
 
-本 workflow 用到 4 个 GitHub REST API 端点,全部走 `gh api` 命令。
+本 workflow 主要使用 GitHub REST API,并在 `discard_local_changes: force` 时使用 `gh repo sync --force` 执行 GitHub `Discard commits` 语义。
 
 ### 1. `GET /repos/{owner}/{repo}` - 拿仓库元信息
 
@@ -16,14 +16,14 @@ gh api repos/cv-cat/Spider_XHS --jq '.default_branch'
 
 ---
 
-### 2. `POST /repos/{fork}/merge-upstream` - 同步 fork (官方接口)
+### 2. `POST /repos/{fork}/merge-upstream` - 快进同步 fork
 
 ```bash
 gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/merge-upstream \
   -f branch=master
 ```
 
-**用途**:把 fork 的某分支快进到 upstream(官方 "Sync fork" 按钮背后的 API)
+**用途**:把 fork 的某分支快进到 upstream
 **限制**:**只能快进**,如果 fork 有 ahead commit 会返回 422
 
 ---
@@ -53,14 +53,25 @@ gh api repos/Link-Start/Spider_XHS_cv-cat/compare/cv-cat:Spider_XHS:master...mas
 
 ---
 
-### 4. `PATCH /repos/{fork}/git/refs/heads/{branch}` - 强制更新分支
+### 4. `gh repo sync --force` / `PATCH git/refs` - Discard commits
+
+```bash
+gh repo sync Link-Start/Spider_XHS_cv-cat \
+  --source cv-cat/Spider_XHS \
+  --branch master \
+  --force
+```
+
+**用途**:执行和 GitHub 网页 `Discard commits` 一样的语义,把 fork 分支 hard reset 到 upstream 分支
+**效果**:fork 独有 commit 会被丢弃;本 workflow 会先创建 `local-backup/*` 备份分支
+
+兜底 API:
 
 ```bash
 gh api -X PATCH repos/Link-Start/Spider_XHS_cv-cat/git/refs/heads/master \
   -f sha=abc1234 -f force=true
 ```
 
-**用途**:强制把 fork 的某分支指向指定 SHA(等价于 `git push --force`)
 **关键参数**:`force=true` 允许非快进(会丢弃 fork 独有的 commit)
 
 ---
@@ -104,7 +115,7 @@ gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/git/refs \
 │         identical  → 跳过                     │
 │         behind     → merge-upstream 快进      │
 │         ahead      → upstream 无新增,跳过     │
-│         diverged   → 去重备份后 force/keep    │
+│         diverged   → 去重备份后 Discard/keep  │
 └────────────────┬─────────────────────────────┘
                  ↓
 ┌──────────────────────────────────────────────┐
@@ -133,11 +144,11 @@ gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/git/refs \
 | `identical` | 完全一致 | 一模一样 | 跳过 | 啥都不做 |
 | `behind` | fork 落后 | upstream 多了 commit, fork 没动 | `merge-upstream` 快进 | **最干净,无 merge commit** |
 | `ahead` | fork 超前 | 你手动改了 fork, upstream 没动 | 跳过 | upstream 无新增,不备份也不写分支 |
-| `diverged` | 双向分歧 | 你改了 fork, upstream 也改了 | 去重备份后按 `discard_local_changes` 处理 | `force` 强制对齐;`keep` 尝试 `merge-upstream` |
+| `diverged` | 双向分歧 | 你改了 fork, upstream 也改了 | 去重备份后按 `discard_local_changes` 处理 | `force` 执行 `Discard commits`;`keep` 尝试 `merge-upstream` |
 
 **只有 upstream 有新增且 fork 有本地提交时才会创建 `local-backup/*`**。如果最近备份里已经有相同本地 patch,不会重复创建备份分支。
 
 **想保留 fork 上的某些独有 commit**:
 - 把它们 commit 到 upstream 不会用的分支名 (比如 `local-my-changes`)
 - 或者把 `discard_local_changes` 设为 `keep`,让 workflow 在分歧时尝试保留本地 commit
-- 已经被 force 覆盖的本地 commit,用 `local-backup/*` 找回来(见 [04-backup-faq.md](04-backup-faq.md))
+- 已经被 `Discard commits` 覆盖的本地 commit,用 `local-backup/*` 找回来(见 [04-backup-faq.md](04-backup-faq.md))

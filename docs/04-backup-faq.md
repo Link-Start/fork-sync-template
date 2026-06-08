@@ -28,7 +28,7 @@ local-backup/master-20260603-153045-a1b2c3d
 - 触发条件:upstream 有新增(`behind_by > 0`)且 fork 有本地提交(`ahead_by > 0`)
 - 不触发条件:纯 `ahead`(`behind_by = 0`)表示 upstream 没有新增,workflow 会跳过,不备份也不写分支
 - 去重规则:如果最近的 `local-backup/*` 分支和当前 fork 分支相对 upstream 的本地 patch 一样,跳过新备份
-- 创建时机:在 force 对齐或 `merge-upstream` 前
+- 创建时机:在 `Discard commits` 或 `merge-upstream` 前
 - **不自动清理** — 本地修改是你的数据,不像 backup tag 那样只保留 20 个
 - 如果本次需要备份但备份分支创建失败,该分支会跳过同步,避免在未备份时丢失本地修改
 
@@ -132,11 +132,11 @@ GitHub 网页 → fork 仓库 → 找到 backup tag → 点 "Compare" → 选 ma
 
 | 现象 | 原因 | 修复 |
 |---|---|---|
-| 发现到了 fork,但 PATCH/POST 失败 (403) | `FORK_SYNC_TOKEN` 未配置或没有目标 fork 写权限 | 在配置仓库 Actions secrets 新增/修正 `FORK_SYNC_TOKEN`,给目标 fork `Contents: Read and write` |
+| 发现到了 fork,但写操作失败 (403) | `FORK_SYNC_TOKEN` 未配置或没有目标 fork 写权限 | 在配置仓库 Actions secrets 新增/修正 `FORK_SYNC_TOKEN`,给目标 fork `Contents: Read and write` |
 | 写 issue/report 失败 (403) | 当前配置仓库 token 权限不足 | Settings → Actions → General → Workflow permissions → 改 **Read and write**,或让 `FORK_SYNC_TOKEN` 覆盖配置仓库 |
 | "上游不可访问" warning | upstream 真的删了/archived | 这是预期,等 upstream 恢复 |
 | "新建分支失败" | fork 已有同名分支但被保护 | 检查分支保护规则 |
-| "PATCH 失败" | fork 仓库的分支有保护规则,不允许 force | 临时关保护,跑完再开 |
+| "Discard commits 失败" 或 "Discard commits 校验失败" | fork 仓库的分支保护/权限/限流导致 hard reset 没完成 | 检查分支保护和 `FORK_SYNC_TOKEN`;workflow 会等待 API rate limit reset 后重试 |
 | 定时任务完全不跑 | fork 默认禁用 schedule | Actions 标签页点 "I understand my workflows, go ahead and enable them" |
 
 ### Q2: 怎么改同步时间?
@@ -210,7 +210,7 @@ GitHub 对 **fork 仓库的定时任务默认禁用**,需要:
 
 ### Q12: 跑一次大概多久?
 
-- 公开 repo + 公开 upstream:**5-15 秒**(纯 API,秒级)
+- 公开 repo + 公开 upstream:**5-15 秒**(GitHub CLI/API,通常秒级)
 - 私有 repo:取决于仓库大小,可能要 30 秒+
 
 ### Q13: 我能在 fork 上有我自己的 commit 吗?
@@ -231,7 +231,7 @@ GitHub 对 **fork 仓库的定时任务默认禁用**,需要:
 |---|---|---|
 | 触发 | 手动 | 自动定时 + 手动 |
 | 范围 | 只默认分支 | 所有分支 |
-| ahead commit 处理 | 要点 "Discard X commits" 多一步 | 自动丢弃 |
+| ahead commit 处理 | 要点 "Discard X commits" 多一步 | 先备份,再自动执行 `Discard commits` 语义 |
 | 备份 | 无 | 自动 backup tag |
 | 失败感知 | 看不出来 | 邮件/workflow 红 |
 

@@ -66,7 +66,7 @@ env:
   DEFAULT_SIZE_DROP_THRESHOLD: '0.10'      # 上游体积暴减阈值
   DEFAULT_MAX_PARALLEL: '4'                # 并发数
   DEFAULT_SIZE_CHECK_EXEMPT: ''            # size 检查豁免 fork 名,逗号分隔
-  DEFAULT_DISCARD_LOCAL_CHANGES: 'force'   # upstream 有新增且 fork 有本地提交时的处理方式
+  DEFAULT_DISCARD_LOCAL_CHANGES: 'force'   # upstream 有新增且 fork 有本地提交时,备份后 Discard commits
 ```
 
 **方式 B: 用 `.github/sync-config.yml` 覆盖默认值**

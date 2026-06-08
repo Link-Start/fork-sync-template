@@ -11,14 +11,14 @@ fork master 比 upstream 多 1 个 commit (yml 本身)
     ↓
 workflow 跑,compare 返回 ahead=1
     ↓
-force-PATCH master 到 upstream 的 SHA
+执行 Discard commits,把 master hard reset 到 upstream 的 SHA
     ↓
 .yml 文件被删
     ↓
 下次 schedule 触发,yml 没了,workflow 找不到定义 → 再也不跑了
 ```
 
-**根本原因**:workflow 文件本身就是 fork master 的"内容",force-PATCH 等于把整个 master 内容替换成 upstream 的,yml 必然跟着没。
+**根本原因**:workflow 文件本身就是 fork master 的"内容",Discard commits 等于把整个 master 内容替换成 upstream 的,yml 必然跟着没。
 
 ---
 
@@ -56,12 +56,12 @@ force-PATCH master 到 upstream 的 SHA
 
 ### 为什么放 fork 自己会自毁
 
-yml 的设计是「用一个独立配置仓库去同步目标 fork」。如果把 yml 放在 fork 本身,yml 文件会变成 fork 的本地提交;纯 `ahead` 时现在会跳过,但只要 upstream 后续也有新增,默认 `discard_local_changes: force` 仍会在备份后把 fork 对齐 upstream,这个 workflow 文件会被移走。
+yml 的设计是「用一个独立配置仓库去同步目标 fork」。如果把 yml 放在 fork 本身,yml 文件会变成 fork 的本地提交;纯 `ahead` 时现在会跳过,但只要 upstream 后续也有新增,默认 `discard_local_changes: force` 仍会在备份后执行 Discard commits,这个 workflow 文件会被移走。
 
 如果把 yml 放在 fork 本身:
 - yml 本身就是 fork 比 upstream 多出来的那个 commit
 - workflow 遇到纯 `ahead` → 暂时跳过
-- upstream 后续新增 commit → 分支变成 `diverged` → 默认 force 对齐 upstream,这个 yml 文件被移走
+- upstream 后续新增 commit → 分支变成 `diverged` → 默认 Discard commits 对齐 upstream,这个 yml 文件被移走
 - 下次再跑 → yml 已经没了 → 整个机制消失
 
 ### 非 fork 仓库天然解决两个 fork 上的麻烦

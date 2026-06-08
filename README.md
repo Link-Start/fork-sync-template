@@ -1,7 +1,7 @@
 # Fork Sync Template
 
 > 一套用于自动把 fork 仓库同步到上游 (upstream) 的 GitHub Actions 模板
-> **纯 API 实现 · 无需 checkout / push · 几秒跑完 · 自动备份 · 免维护 fork 列表**
+> **GitHub CLI/API 实现 · 无需 checkout · 自动备份 · 免维护 fork 列表**
 
 ---
 
@@ -194,6 +194,7 @@ local-backup/master-20260603-153045-a1b2c3d
 - upstream 没有新增(`behind_by = 0`)时跳过,不备份也不写分支
 - 仅在 upstream 有新增(`behind_by > 0`)且 fork 有本地提交(`ahead_by > 0`)时创建
 - 如果最近的 `local-backup/*` 已经包含相同本地 patch,跳过新备份
+- 默认 `discard_local_changes: force` 会在备份后执行 GitHub `Discard commits` 语义,把 fork 分支硬重置到 upstream
 - **不自动清理**(本地数据是你自己的,不像 backup tag 自动保留 20 个)
 - 清理方法:用 `Cleanup Local Backup Branches` workflow,只允许删标准 `local-backup/*` 备份分支
 - 找回方法:`git checkout local-backup/master-...` → 找 commit → cherry-pick 到新分支

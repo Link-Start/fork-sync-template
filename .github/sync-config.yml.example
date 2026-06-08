@@ -31,7 +31,7 @@ max_parallel: 4
 sync_mode: auto
 
 # upstream 有新增且 fork 有本地提交时的处理方式
-# force = 去重备份本地修改后,强制对齐 upstream
+# force = 去重备份本地修改后,执行 GitHub Discard commits,强制对齐 upstream
 # keep  = 去重备份本地修改后,尝试 merge-upstream 保留本地提交
 # 纯 ahead 且 upstream 无新增时跳过,不备份也不写分支
 discard_local_changes: force
