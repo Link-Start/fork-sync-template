@@ -216,6 +216,8 @@ branch_limit_overrides: "repo-h=12,Link-Start/repo-i=20,repo-j=0"
 
 这些保护性跳过场景不会执行 merge、PATCH、Discard commits 或任何会改写 fork 分支的同步操作。
 
+保护备份复用规则:如果没有标准 `local-backup/*` 备份就创建;如果已有备份分支包含当前 fork 默认分支 HEAD,说明当前 fork 的所有提交已经被备份,直接跳过新备份;如果已有备份不包含当前 HEAD,说明 fork 后续又有新提交,会再次创建保护备份。
+
 **`size_drop_threshold` 可调** (默认 `0.10` = 10%):
 - `0.10` (默认) — 敏感,推荐大多数人
 - `0.30` — 宽松,大重构可能误判

@@ -97,3 +97,25 @@ fork 上**同时存在** dev 和 develop,dev 内容不变,develop 内容跟 upst
 2. 或者去 upstream 改回去(重新 push 源码)
 3. 或者直接删 fork
 4. **或者临时把阈值改成 0**(关闭检测),跑完再改回来
+
+### 场景 11: fork network 源库迁移/重建,但旧 fork 需要保留
+
+典型表现:
+
+- GitHub 页面点 fork 源头跳到一个新 owner/repo
+- 旧的 owner/repo 地址 404 或不可访问
+- 新源库能打开,但提交历史很短或被重写
+- 当前 fork 和新源库默认分支 compare 返回 `No common ancestor`
+- 在新源库点 Fork 会跳回当前旧 fork,因为 GitHub 认为它们仍在同一个 fork network
+
+标准处理策略:
+
+| 条件 | 处理 |
+|---|---|
+| 旧 fork 的 `parent/source` 已指向新源库,但默认分支没有共同祖先,且旧 fork 有自己的历史提交 | 保留旧 fork,加入 `exclude_repos`,不要自动同步 |
+| 新源库看起来是重建、改 owner 或重写历史后的有效源库 | 新建普通仓库镜像,命名使用新 owner,例如 `repo_laowang74152` |
+| 只是上游普通改名/转移,compare 正常且有共同祖先 | 不新建普通仓库,继续按 fork 同步 |
+| 上游删除、私有化、账号消失或 parent/source 不可访问 | 不同步;没有保护备份就创建,已有保护备份且包含当前 fork HEAD 就跳过,否则再次备份 |
+| 同一个 GitHub fork network 导致同一 owner 不能重复 fork | 不强行动旧 fork;用普通仓库镜像,或 fork 到另一个 org |
+
+第 4 条的备份去重标准不是“有没有同名备份”或“最新备份 SHA 是否相同”,而是检查标准 `local-backup/*` 分支是否包含当前 fork 默认分支 HEAD。只要某个备份分支包含当前 HEAD,就表示当前 fork 的所有提交已经被保护;如果当前 fork 后续又有新提交,旧备份不再包含当前 HEAD,下一次保护性跳过会创建新备份。

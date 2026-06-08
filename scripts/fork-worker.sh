@@ -254,7 +254,7 @@ process_fork() {
       >> "$RUNNER_TEMP/summary.jsonl"
   }
 
-  latest_local_backup_branch() {
+  local_backup_branches() {
     local source_branch="$1"
     local prefix="local-backup/${source_branch}-"
     gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/matching-refs/heads/$prefix" \
@@ -265,12 +265,48 @@ process_fork() {
           if (rest ~ /^[0-9]{8}-[0-9]{6}-[0-9a-f]{7}$/) print
         }' \
       | sort -r \
-      | head -1 || true
+      || true
+  }
+
+  latest_local_backup_branch() {
+    local source_branch="$1"
+    local_backup_branches "$source_branch" | head -1 || true
+  }
+
+  local_backup_contains_sha() {
+    local backup_branch="$1" fork_sha="$2"
+    local backup_sha compare_status compare_err compare_api
+
+    backup_sha=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$backup_branch" \
+                 --jq '.object.sha' 2>/dev/null || echo "")
+    [ -z "$backup_sha" ] && return 1
+    [ "$backup_sha" = "$fork_sha" ] && return 0
+
+    compare_api="repos/$FORK_OWNER/$FORK_REPO/compare/$fork_sha...$backup_sha"
+    if ! gh_api_capture compare_status compare_err "$compare_api" --jq '.status'; then
+      return 1
+    fi
+    case "$compare_status" in
+      identical|ahead) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
+  protective_backup_for_current_head() {
+    local source_branch="$1" fork_sha="$2" backup_branch
+    while IFS= read -r backup_branch; do
+      [ -z "$backup_branch" ] && continue
+      if local_backup_contains_sha "$backup_branch" "$fork_sha"; then
+        printf '%s\n' "$backup_branch"
+        return 0
+      fi
+    done < <(local_backup_branches "$source_branch")
+    return 1
   }
 
   ensure_protective_local_backup() {
     local source_branch="$1" reason="$2"
-    local fork_sha fork_sha_err fork_sha_api backup_branch latest latest_sha
+    local fork_sha fork_sha_err fork_sha_api backup_branch existing_backup
     local backup_out backup_err backup_api
     fork_sha_api="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$source_branch"
     if ! gh_api_capture fork_sha fork_sha_err "$fork_sha_api" --jq '.object.sha'; then
@@ -282,16 +318,12 @@ process_fork() {
       return 1
     fi
 
-    latest=$(latest_local_backup_branch "$source_branch")
-    if [ -n "$latest" ]; then
-      latest_sha=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$latest" \
-                   --jq '.object.sha' 2>/dev/null || echo "")
-      if [ "$latest_sha" = "$fork_sha" ]; then
-        echo "    📦 已有同 SHA 保护备份: $latest → ${fork_sha:0:7}"
-        LOCAL_BACKED_UP+=("$source_branch:$latest")
-        log_event "$FORK_REPO" "local_backup" "skip" branch="$source_branch" backup_branch="$latest" reason="已有同 SHA 保护备份" sha="${fork_sha:0:7}"
-        return 0
-      fi
+    existing_backup=$(protective_backup_for_current_head "$source_branch" "$fork_sha" || true)
+    if [ -n "$existing_backup" ]; then
+      echo "    📦 已有包含当前 HEAD 的保护备份: $existing_backup → ${fork_sha:0:7}"
+      LOCAL_BACKED_UP+=("$source_branch:$existing_backup")
+      log_event "$FORK_REPO" "local_backup" "skip" branch="$source_branch" backup_branch="$existing_backup" reason="已有保护备份包含当前 fork HEAD" sha="${fork_sha:0:7}"
+      return 0
     fi
 
     backup_branch="local-backup/${source_branch}-$(date +%Y%m%d-%H%M%S)-${fork_sha:0:7}"
