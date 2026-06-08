@@ -38,6 +38,9 @@ fork-sync-template/
 ├── examples/                          # 两种风格的通用模板 (fork 后不会被自动跑)
 │   ├── sync-dynamic.yml              # 通用动态发现 (排除 pattern 为空,同步所有 fork)
 │   └── sync-static.yml               # 通用静态 matrix (需要手写 fork 列表)
+├── scripts/                           # API / git helper 参考实现,方便复用和排障
+│   ├── github-api.sh                  # gh api 重试、错误解析、upstream 探测
+│   └── git-cli.sh                     # git fetch / merge-base / patch-id 签名方法
 ├── docs/                              # 10 个独立文档
 │   ├── 01-architecture.md
 │   ├── 02-setup.md

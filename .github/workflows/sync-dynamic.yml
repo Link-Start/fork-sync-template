@@ -746,8 +746,17 @@ jobs:
             api_error_hint() {
               local context="$1" status="$2" message="$3"
               case "$context:$status:$message" in
+                upstream_repo:404:*)
+                  printf '%s' "上游仓库本体不可访问; 常见原因: 源仓库被删除、改私有且 token 无权限、仓库改名但 fork 元数据残留、owner 账号不可见或 token 无权限"
+                  ;;
+                upstream_repo:403:*)
+                  printf '%s' "上游仓库本体被拒绝访问; 常见原因: token 权限不足、私有仓库无权限、组织 SSO/策略限制或 API 限制"
+                  ;;
                 branches:404:*)
                   printf '%s' "上游仓库分支列表不可访问; 常见原因: 上游仓库被删除、私有化、改名、空仓库或 token 无权限"
+                  ;;
+                branches:403:*)
+                  printf '%s' "上游仓库分支列表被拒绝访问; 常见原因: token 权限不足、私有仓库无权限、组织 SSO/策略限制或 API 限制"
                   ;;
                 upstream_sha:404:*)
                   printf '%s' "上游分支当前不可读取; 常见原因: 分支已删除/重命名、分支名包含特殊路径导致 ref 查询失败、或 API 列表与 ref 查询之间发生变化"
@@ -937,6 +946,25 @@ jobs:
               return 0
             }
 
+            probe_upstream_repository() {
+              local repo_out repo_err repo_api status message hint
+              repo_api="repos/$UPSTREAM_OWNER/$UPSTREAM_REPO"
+              if gh_api_capture repo_out repo_err "$repo_api" --jq '{full_name, private, default_branch, size, archived, disabled}'; then
+                printf '%s\n' "$repo_out"
+                return 0
+              fi
+
+              status=$(api_error_field "$repo_err" "status")
+              message=$(api_error_message "$repo_err")
+              hint=$(api_error_hint "upstream_repo" "$status" "$message")
+              UPSTREAM_UNAVAILABLE_REASON="上游仓库本体不可访问 (HTTP ${status:-unknown}: ${message:-unknown}); $hint"
+              echo "::warning::$UPSTREAM_UNAVAILABLE_REASON" >&2
+              log_event "$FORK_REPO" "upstream_check" "fail" \
+                upstream="$UPSTREAM_OWNER/$UPSTREAM_REPO" reason="$UPSTREAM_UNAVAILABLE_REASON" \
+                context="upstream_repo" api_path="$repo_api" api_status="$status" api_message="$message" hint="$hint"
+              return 1
+            }
+
             fetch_ref_for_signature() {
               local repo_dir="$1"
               local remote="$2"
@@ -1029,6 +1057,22 @@ jobs:
               protect_and_skip_fork "上游不可访问,已保护备份并跳过同步" "${UPSTREAM_UNAVAILABLE_REASON:-疑似源仓库已删除、私有化、改名或 token 无权限}"
               return 0
             fi
+
+            local UPSTREAM_REPO_PROBE UPSTREAM_PROBED_DEFAULT UPSTREAM_PROBED_SIZE
+            if ! UPSTREAM_REPO_PROBE=$(probe_upstream_repository); then
+              protect_and_skip_fork "上游仓库不可访问,已保护备份并跳过同步" "$UPSTREAM_UNAVAILABLE_REASON"
+              return 0
+            fi
+            UPSTREAM_PROBED_DEFAULT=$(echo "$UPSTREAM_REPO_PROBE" | jq -r '.default_branch // empty' 2>/dev/null || echo "")
+            UPSTREAM_PROBED_SIZE=$(echo "$UPSTREAM_REPO_PROBE" | jq -r '.size // 0' 2>/dev/null || echo 0)
+            if [ -z "$UPSTREAM_PROBED_DEFAULT" ]; then
+              UPSTREAM_UNAVAILABLE_REASON="上游仓库 default_branch 为空; 可能是空仓库、源码不可用或 token 无权限读取默认分支"
+              log_event "$FORK_REPO" "upstream_check" "fail" upstream="$UPSTREAM_OWNER/$UPSTREAM_REPO" reason="$UPSTREAM_UNAVAILABLE_REASON"
+              protect_and_skip_fork "上游默认分支不可用,已保护备份并跳过同步" "$UPSTREAM_UNAVAILABLE_REASON"
+              return 0
+            fi
+            UPSTREAM_DEFAULT="$UPSTREAM_PROBED_DEFAULT"
+
             log_event "$FORK_REPO" "upstream_check" "ok" upstream="$UPSTREAM_OWNER/$UPSTREAM_REPO" default_branch="$UPSTREAM_DEFAULT"
             echo "🔍 上游默认分支: $UPSTREAM_DEFAULT"
 
@@ -1048,7 +1092,7 @@ jobs:
               log_event "$FORK_REPO" "size_check" "exempt" reason="在白名单里"
             fi
             FORK_SIZE=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null || echo 0)
-            UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null || echo 0)
+            UPSTREAM_SIZE="${UPSTREAM_PROBED_SIZE:-0}"
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && \
                [ "$(awk "BEGIN {print ($SIZE_DROP_THRESHOLD > 0 && $UPSTREAM_SIZE <= 0) ? 1 : 0}")" = "1" ]; then

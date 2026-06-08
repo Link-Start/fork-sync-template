@@ -2,6 +2,23 @@
 
 ## 加网络重试 (推荐)
 
+项目已经把常用方法沉淀到 `scripts/` 下,便于查看和复用:
+
+| 文件 | 用途 |
+|---|---|
+| `scripts/github-api.sh` | `gh api` 重试、错误字段解析、错误 hint、upstream 仓库/分支探测 |
+| `scripts/git-cli.sh` | 临时 git 仓库初始化、fetch ref、merge-base、patch-id 签名比较 |
+
+workflow 仍然保持 no-checkout 架构,运行时会内联必要函数;`scripts/` 是同逻辑的可读参考实现,适合本地排障和后续抽取复用。
+
+本地探测 upstream 可访问性示例:
+
+```bash
+source scripts/github-api.sh
+probe_upstream_repository Jawaz-Keyzor DarkGPT
+probe_upstream_branches Jawaz-Keyzor DarkGPT
+```
+
 把 `gh api` 调用包一层重试函数:
 
 ```bash

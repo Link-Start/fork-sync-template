@@ -4,7 +4,7 @@
 
 本 workflow 使用 GitHub REST API。`discard_local_changes: force` 会直接把 fork ref 强制更新到 upstream SHA,实现 GitHub `Discard commits` 的最终状态。
 
-### 1. `GET /repos/{owner}/{repo}` - 拿仓库元信息
+### 1. `GET /repos/{owner}/{repo}` - 拿仓库元信息 / 验证 upstream 可访问性
 
 ```bash
 gh api repos/cv-cat/Spider_XHS --jq '.default_branch'
@@ -12,7 +12,18 @@ gh api repos/cv-cat/Spider_XHS --jq '.default_branch'
 
 **返回**:`{ "default_branch": "master", "fork": false, ... }`
 
-**用途**:检测上游是否存活 + 拿默认分支名
+**用途**:检测上游是否真实可访问 + 拿默认分支名、仓库大小等信息。
+
+**关键保护**:即使 fork 元数据里还残留 `parent.default_branch`,也必须再直接 GET upstream 仓库本体。如果这里返回 404/403/不可读,说明源码库当前对 token 不可访问,workflow 会先保护备份 fork 默认分支,然后跳过同步,不会继续拉 branches / compare / Discard commits。
+
+常见含义:
+
+| API 结果 | 处理 | 常见原因 |
+|---|---|---|
+| 200 | 继续同步流程 | upstream 可访问 |
+| 404 | 保护备份后跳过 | 源仓库删除、私有化无权限、改名但 fork 元数据残留、owner 不可见、token 无权限 |
+| 403 | 保护备份后跳过 | token 权限不足、组织 SSO/策略限制、私有仓库无权限、API 限制 |
+| `default_branch` 为空 | 保护备份后跳过 | 空仓库、源码不可用、默认分支不可读 |
 
 ---
 
@@ -86,7 +97,8 @@ gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/git/refs \
 ┌──────────────────────────────────────────────┐
 │ 阶段 1: 上游存活检查                          │
 │   gh api repos/<upstream>                    │
-│   拿不到 → exit 0 + warning (不算 fail)       │
+│   404/403/不可读 → 保护备份 + skip            │
+│   parent 元数据残留但 upstream 404 也会拦截    │
 └────────────────┬─────────────────────────────┘
                  ↓
 ┌──────────────────────────────────────────────┐
