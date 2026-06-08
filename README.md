@@ -1,7 +1,7 @@
 # Fork Sync Template
 
 > 一套用于自动把 fork 仓库同步到上游 (upstream) 的 GitHub Actions 模板
-> **GitHub CLI/API 实现 · 无需 checkout · 自动备份 · 免维护 fork 列表**
+> **GitHub CLI/API 实现 · checkout 配置仓库脚本 · 自动备份 · 免维护 fork 列表**
 
 ---
 
@@ -10,7 +10,7 @@
 一个**可直接 fork 使用的 GitHub 模板仓库**。本仓库的 `.github/workflows/sync-dynamic.yml` 是作者日常使用配置(自动排除 claude 相关库);`examples/` 下放两种风格的**通用模板**(不放在 `.github/workflows/` 里所以不会被自动跑,fork 者可按需启用)。
 
 **核心特性**:
-- ✅ 纯 GitHub REST API,不 checkout 代码、不 push
+- ✅ 纯 GitHub REST API,只 checkout 配置仓库脚本,不 checkout 目标 fork、不 git push
 - ✅ 动态发现模式,自动列出你名下所有 fork
 - ✅ 支持名称/owner 模式排除(自动跳过指定 fork)
 - ✅ 自动检测 fork 的"超前/落后"状态
@@ -80,8 +80,9 @@ fork-sync-template/
 2. **用 `examples/sync-dynamic.yml` 替换默认 yml**:
    - 进 `.github/workflows/`,删掉 `sync-dynamic.yml`
    - 把 `examples/sync-dynamic.yml` 复制/移动到 `.github/workflows/sync-dynamic.yml`
-3. **开写权限 + 开定时任务** (跟方式 1 的 2/3 步一样)
-4. 完事。yml 会同步你名下**所有** fork (无排除)。
+3. **保留 `scripts/` 目录**: 动态 workflow 会 checkout 当前配置仓库并执行 `scripts/sync-each-fork.sh`
+4. **开写权限 + 开定时任务** (跟方式 1 的 2/3 步一样)
+5. 完事。yml 会同步你名下**所有** fork (无排除)。
 
 ### 方式 3: 用静态 matrix (精确控制同步列表)
 

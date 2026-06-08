@@ -9,7 +9,7 @@
 | `scripts/github-api.sh` | `gh api` 重试、错误字段解析、错误 hint、upstream 仓库/分支探测 |
 | `scripts/git-cli.sh` | 临时 git 仓库初始化、fetch ref、merge-base、patch-id 签名比较 |
 
-workflow 仍然保持 no-checkout 架构,运行时会内联必要函数;`scripts/` 是同逻辑的可读参考实现,适合本地排障和后续抽取复用。
+workflow 会 checkout 当前配置仓库并 source `scripts/` 下的脚本;目标 fork 仍然不 checkout、不 git push。`scripts/` 是运行时逻辑和本地排障共用的实现。
 
 本地探测 upstream 可访问性示例:
 

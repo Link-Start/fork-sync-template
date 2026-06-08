@@ -9,6 +9,7 @@ github_auth_header() {
   [ -z "$token" ] && return 1
   printf 'AUTHORIZATION: basic %s\n' "$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
 }
+export -f github_auth_header
 
 git_init_probe_repo() {
   local repo_dir="$1" fork_url="$2" upstream_url="$3"
@@ -16,12 +17,14 @@ git_init_probe_repo() {
   git -C "$repo_dir" remote add fork "$fork_url" || return 1
   git -C "$repo_dir" remote add upstream "$upstream_url" || return 1
 }
+export -f git_init_probe_repo
 
 git_fetch_ref_for_signature() {
   local repo_dir="$1" remote="$2" source_ref="$3" target_ref="$4" auth_header="$5"
   git -C "$repo_dir" -c http.extraheader="$auth_header" fetch --quiet --no-tags --depth=1000 \
     "$remote" "$source_ref:$target_ref"
 }
+export -f git_fetch_ref_for_signature
 
 git_local_changes_signature() {
   local repo_dir="$1" upstream_ref="$2" head_ref="$3"
@@ -34,6 +37,7 @@ git_local_changes_signature() {
         | paste -sd, -)
   printf '%s\n' "${sig:-empty}"
 }
+export -f git_local_changes_signature
 
 git_compare_local_backup_signature() {
   local repo_dir="$1" source_branch="$2" backup_branch="$3" auth_header="$4"
@@ -47,3 +51,4 @@ git_compare_local_backup_signature() {
   backup_sig=$(git_local_changes_signature "$repo_dir" refs/sync/upstream refs/sync/backup) || return 2
   [ "$current_sig" = "$backup_sig" ]
 }
+export -f git_compare_local_backup_signature

@@ -126,6 +126,12 @@ fork-sync-template/
 ├── examples/
 │   ├── sync-dynamic.yml              # 通用模板: 动态发现版 (同步所有 fork)
 │   └── sync-static.yml               # 通用模板: 静态 matrix 版 (要手写 fork 列表)
+├── scripts/                           # 动态 workflow 运行脚本和 helper
+│   ├── sync-each-fork.sh              # 并发同步编排
+│   ├── fork-worker.sh                 # 单 fork 同步主流程
+│   ├── github-api.sh                  # gh api 重试和错误解析
+│   ├── git-cli.sh                     # git 签名比较 helper
+│   └── common.sh                      # 通用日志函数
 ├── docs/                              # 10 个独立文档
 │   ├── 01-architecture.md            # ← 你正在读
 │   ├── 02-setup.md
@@ -149,6 +155,8 @@ fork-sync-template/
 └── <fork-name>-sync/           # 独立配置仓库,装 .github/workflows/sync-dynamic.yml
     ├── .github/workflows/
     │   └── sync-dynamic.yml
+    ├── scripts/
+    │   └── *.sh
     └── README.md (可选,简单说明)
 ```
 

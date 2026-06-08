@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
 # Shared GitHub API helpers for fork-sync workflows and local diagnostics.
-# The workflow currently inlines these helpers to keep the no-checkout runtime,
-# but this file is the source-of-truth reference for reusable API behavior.
+# Workflow steps source this file after checking out the configuration repo.
 
 wait_for_core_rate_limit() {
   local info remaining reset limit now wait reset_human
@@ -24,6 +23,7 @@ wait_for_core_rate_limit() {
   fi
   return 1
 }
+export -f wait_for_core_rate_limit
 
 gh_api_with_retry() {
   local max_attempts=3
@@ -53,6 +53,7 @@ gh_api_with_retry() {
   echo "  gh api failed after $max_attempts attempts: $(printf '%s' "$output" | head -1)" >&2
   return 1
 }
+export -f gh_api_with_retry
 
 gh_api_capture() {
   local __out_var="$1" __err_var="$2"
@@ -76,6 +77,28 @@ gh_api_capture() {
   rm -f "$error_file" "$stderr_file"
   return "$rc"
 }
+export -f gh_api_capture
+
+gh_api_write() {
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    echo "[DRY-RUN] gh api $*"
+    return 0
+  fi
+  gh_api_with_retry "$@"
+}
+export -f gh_api_write
+
+gh_api_write_capture() {
+  local __out_var="$1" __err_var="$2"
+  shift 2
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    printf -v "$__out_var" '[DRY-RUN] gh api %s' "$*"
+    printf -v "$__err_var" '%s' ""
+    return 0
+  fi
+  gh_api_capture "$__out_var" "$__err_var" "$@"
+}
+export -f gh_api_write_capture
 
 api_error_field() {
   local raw="$1" field="$2" json
@@ -84,6 +107,7 @@ api_error_field() {
     jq -r --arg field "$field" '.[$field] // empty' <<<"$json" 2>/dev/null | head -1
   fi
 }
+export -f api_error_field
 
 api_error_message() {
   local raw="$1" message
@@ -96,6 +120,7 @@ api_error_message() {
   fi
   printf '%s' "$message" | tr '\r\n' ' ' | cut -c 1-500
 }
+export -f api_error_message
 
 api_error_hint() {
   local context="$1" status="$2" message="$3"
@@ -132,6 +157,7 @@ api_error_hint() {
       ;;
   esac
 }
+export -f api_error_hint
 
 probe_upstream_repository() {
   local owner="$1" repo="$2" repo_out repo_err status message hint
@@ -153,6 +179,7 @@ probe_upstream_repository() {
     '{owner: $owner, repo: $repo, reachable: false, status: $status, message: $message, hint: $hint}' >&2
   return 1
 }
+export -f probe_upstream_repository
 
 probe_upstream_branches() {
   local owner="$1" repo="$2" branches_out branches_err status message hint
@@ -173,3 +200,4 @@ probe_upstream_branches() {
     '{owner: $owner, repo: $repo, reachable: false, status: $status, message: $message, hint: $hint}' >&2
   return 1
 }
+export -f probe_upstream_branches

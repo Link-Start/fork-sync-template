@@ -60,6 +60,8 @@ cd / && rm -rf "$TMP"
 
 打开 `<fork-name>-sync` 仓库的 `.github/workflows/sync-dynamic.yml`,按需修改:
 
+动态版会 checkout 当前配置仓库并执行 `scripts/` 里的脚本,所以部署时必须保留 `scripts/*.sh`。目标 fork 不会被 checkout,同步仍通过 GitHub API 修改 refs。
+
 ```yaml
 env:
   DEFAULT_EXCLUDE_PATTERN: 'claude'        # 排除仓库名含 claude 的 fork
