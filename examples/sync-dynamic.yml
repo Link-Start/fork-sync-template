@@ -657,7 +657,7 @@ jobs:
             branch_limit_group_for_repo() {
               local groups="$1" group limit repos repo_full="$FORK_OWNER/$FORK_REPO"
               [ -z "$groups" ] && return 1
-              printf '%s' "$groups" | tr ';' '\n' | while IFS= read -r group; do
+              while IFS= read -r group; do
                 group=$(printf '%s' "$group" | sed 's/^ *//;s/ *$//')
                 [ -z "$group" ] && continue
                 case "$group" in
@@ -673,9 +673,10 @@ jobs:
                 if csv_lines "$repos" | grep -Fxq "$FORK_REPO" || \
                    csv_lines "$repos" | grep -Fxq "$repo_full"; then
                   printf '%s\n' "$limit"
-                  exit 0
+                  return 0
                 fi
-              done
+              done < <(printf '%s\n' "$groups" | tr ';' '\n')
+              return 1
             }
 
             first_json_line() {
