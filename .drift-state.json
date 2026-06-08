@@ -1,11 +1,11 @@
 {
   "forks": {
-    "douyin_erma0": {
-      "last_result": "skip",
-      "last_ts": "2026-06-08T12:31:56.966Z",
+    "lark-cli-arksuite": {
+      "last_result": "complete",
+      "last_ts": "2026-06-08T13:39:59.106Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     }
   },
-  "updated_at": "2026-06-08T12:31:57Z"
+  "updated_at": "2026-06-08T13:39:59Z"
 }
