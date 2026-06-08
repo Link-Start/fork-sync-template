@@ -187,41 +187,6 @@ jobs:
           }
           export -f gh_api_with_retry
 
-          gh_repo_sync_force() {
-            local destination="$1"
-            local source="$2"
-            local branch="$3"
-            if [ "${DRY_RUN:-false}" = "true" ]; then
-              echo "[DRY-RUN] gh repo sync $destination --source $source --branch $branch --force"
-              return 0
-            fi
-
-            local max_attempts=3
-            local attempt=1
-            local delay=1
-            local output rc
-            while [ "$attempt" -le "$max_attempts" ]; do
-              output=$(gh repo sync "$destination" --source "$source" --branch "$branch" --force 2>&1)
-              rc=$?
-              if [ "$rc" -eq 0 ]; then
-                [ -n "$output" ] && echo "$output"
-                return 0
-              fi
-              if printf '%s' "$output" | grep -Eiq 'rate limit|API rate limit exceeded'; then
-                wait_for_core_rate_limit && continue
-              fi
-              if [ "$attempt" -lt "$max_attempts" ]; then
-                echo "  ⚠️ gh repo sync --force 失败 (第 $attempt/$max_attempts 次),${delay}s 后重试: $(printf '%s' "$output" | head -1)" >&2
-                sleep "$delay"
-                delay=$((delay * 2))
-              fi
-              attempt=$((attempt + 1))
-            done
-            echo "$output" >&2
-            return 1
-          }
-          export -f gh_repo_sync_force
-
           gh_api_write() {
             if [ "${DRY_RUN:-false}" = "true" ]; then
               echo "[DRY-RUN] gh api $*"
@@ -875,19 +840,10 @@ jobs:
                   ;;
                 ahead|diverged)
                   if [ "$DISCARD_LOCAL_CHANGES" = "force" ]; then
-                    # 等价于 GitHub 网页 Sync fork 里的 Discard commits: hard reset 到 upstream。
-                    local SYNC_OK=false VERIFY_SHA
-                    if gh_repo_sync_force "$FORK_OWNER/$FORK_REPO" "$UPSTREAM_OWNER/$UPSTREAM_REPO" "$branch" >/dev/null; then
-                      SYNC_OK=true
-                    else
-                      echo "    ⚠️ gh repo sync --force 失败,改用 git ref force update 兜底"
-                      if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
-                           -f sha="$UPSTREAM_SHA" -f force=true >/dev/null; then
-                        SYNC_OK=true
-                      fi
-                    fi
-
-                    if [ "$SYNC_OK" = "true" ]; then
+                    # 等价于 GitHub 网页 Sync fork 里的 Discard commits: ref 必须指向 upstream SHA。
+                    local VERIFY_SHA
+                    if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                         -f sha="$UPSTREAM_SHA" -f force=true >/dev/null; then
                       VERIFY_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch" \
                                    --jq '.object.sha' 2>/dev/null || echo "")
                       if [ "$VERIFY_SHA" = "$UPSTREAM_SHA" ]; then
@@ -902,7 +858,7 @@ jobs:
                     else
                       echo "    ❌ Discard commits 失败"
                       FAILED+=("$branch")
-                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="discard_commits" reason="gh repo sync --force 和 PATCH 都失败" ahead="$AHEAD" behind="$BEHIND"
+                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="discard_commits" reason="PATCH force update 失败" ahead="$AHEAD" behind="$BEHIND"
                     fi
                   else
                     # keep 模式: 去重备份 + 用 merge-upstream 合并上游更新，保留本地改动

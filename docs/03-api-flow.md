@@ -2,7 +2,7 @@
 
 ## 核心 API 端点说明
 
-本 workflow 主要使用 GitHub REST API,并在 `discard_local_changes: force` 时使用 `gh repo sync --force` 执行 GitHub `Discard commits` 语义。
+本 workflow 使用 GitHub REST API。`discard_local_changes: force` 会直接把 fork ref 强制更新到 upstream SHA,实现 GitHub `Discard commits` 的最终状态。
 
 ### 1. `GET /repos/{owner}/{repo}` - 拿仓库元信息
 
@@ -53,25 +53,15 @@ gh api repos/Link-Start/Spider_XHS_cv-cat/compare/cv-cat:Spider_XHS:master...mas
 
 ---
 
-### 4. `gh repo sync --force` / `PATCH git/refs` - Discard commits
-
-```bash
-gh repo sync Link-Start/Spider_XHS_cv-cat \
-  --source cv-cat/Spider_XHS \
-  --branch master \
-  --force
-```
-
-**用途**:执行和 GitHub 网页 `Discard commits` 一样的语义,把 fork 分支 hard reset 到 upstream 分支
-**效果**:fork 独有 commit 会被丢弃;本 workflow 会先创建 `local-backup/*` 备份分支
-
-兜底 API:
+### 4. `PATCH /repos/{fork}/git/refs/heads/{branch}` - Discard commits
 
 ```bash
 gh api -X PATCH repos/Link-Start/Spider_XHS_cv-cat/git/refs/heads/master \
   -f sha=abc1234 -f force=true
 ```
 
+**用途**:执行和 GitHub 网页 `Discard commits` 一样的最终状态,把 fork 分支 hard reset 到 upstream 分支 SHA
+**效果**:fork 独有 commit 会被丢弃;本 workflow 会先创建 `local-backup/*` 备份分支
 **关键参数**:`force=true` 允许非快进(会丢弃 fork 独有的 commit)
 
 ---
