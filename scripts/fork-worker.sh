@@ -820,7 +820,16 @@ process_fork() {
         if [ "$DISCARD_LOCAL_CHANGES" = "force" ] && \
            [ "$(api_error_field "$COMPARE_ERR" "status")" = "404" ] && \
            printf '%s' "$(api_error_message "$COMPARE_ERR")" | grep -Fq 'No common ancestor'; then
+          local NO_COMMON_ANCESTOR_REASON NO_COMMON_ANCESTOR_STATUS NO_COMMON_ANCESTOR_MESSAGE NO_COMMON_ANCESTOR_HINT
+          NO_COMMON_ANCESTOR_REASON="fork 分支和 upstream 分支没有共同祖先"
+          NO_COMMON_ANCESTOR_STATUS=$(api_error_field "$COMPARE_ERR" "status")
+          NO_COMMON_ANCESTOR_MESSAGE=$(api_error_message "$COMPARE_ERR")
+          NO_COMMON_ANCESTOR_HINT=$(api_error_hint "compare" "$NO_COMMON_ANCESTOR_STATUS" "$NO_COMMON_ANCESTOR_MESSAGE")
           echo "    ⚠️ 分支无共同祖先,按 Discard commits 处理"
+          log_event "$FORK_REPO" "compare" "no_common_ancestor" \
+            branch="$branch" reason="$NO_COMMON_ANCESTOR_REASON" context="compare" \
+            api_path="$COMPARE_API" api_status="$NO_COMMON_ANCESTOR_STATUS" \
+            api_message="$NO_COMMON_ANCESTOR_MESSAGE" hint="$NO_COMMON_ANCESTOR_HINT"
           local ORPHAN_BACKUP_BRANCH ORPHAN_BACKUP_OUT ORPHAN_BACKUP_ERR ORPHAN_BACKUP_API
           local ORPHAN_DISCARD_OUT ORPHAN_DISCARD_ERR ORPHAN_DISCARD_API ORPHAN_VERIFY_SHA ORPHAN_VERIFY_ERR ORPHAN_VERIFY_API
           ORPHAN_BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
@@ -835,6 +844,12 @@ process_fork() {
             ORPHAN_DISCARD_API="repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch"
             if gh_api_write_capture ORPHAN_DISCARD_OUT ORPHAN_DISCARD_ERR -X PATCH "$ORPHAN_DISCARD_API" \
                  -f sha="$UPSTREAM_SHA" -F force=true >/dev/null; then
+              if [ "${DRY_RUN:-false}" = "true" ]; then
+                echo "    [DRY-RUN] 会 Discard commits: 无共同祖先 → ${UPSTREAM_SHA:0:7}"
+                SYNCED+=("$branch")
+                log_event "$FORK_REPO" "sync_branch" "dry_run" branch="$branch" mode="discard_no_common_ancestor" upstream_sha="${UPSTREAM_SHA:0:7}" backup_branch="$ORPHAN_BACKUP_BRANCH" reason="$NO_COMMON_ANCESTOR_REASON"
+                continue
+              fi
               ORPHAN_VERIFY_API="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
               if ! gh_api_capture ORPHAN_VERIFY_SHA ORPHAN_VERIFY_ERR "$ORPHAN_VERIFY_API" \
                    --jq '.object.sha'; then
@@ -847,19 +862,19 @@ process_fork() {
               else
                 echo "    ❌ Discard commits 校验失败: fork=${ORPHAN_VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}"
                 if [ -n "$ORPHAN_VERIFY_ERR" ]; then
-                  record_failure "$branch" "无共同祖先 Discard 后校验失败" "verify_ref" "$ORPHAN_VERIFY_API" "$ORPHAN_VERIFY_ERR" "discard_no_common_ancestor"
+                  record_failure "$branch" "$NO_COMMON_ANCESTOR_REASON; Discard commits 后校验失败" "verify_ref" "$ORPHAN_VERIFY_API" "$ORPHAN_VERIFY_ERR" "discard_no_common_ancestor"
                 else
-                  record_failure "$branch" "无共同祖先同步后 SHA 不一致: fork=${ORPHAN_VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}" "verify_ref" "$ORPHAN_VERIFY_API" "" "discard_no_common_ancestor"
+                  record_failure "$branch" "$NO_COMMON_ANCESTOR_REASON; 同步后 SHA 不一致: fork=${ORPHAN_VERIFY_SHA:0:7}, upstream=${UPSTREAM_SHA:0:7}" "compare" "$COMPARE_API" "$COMPARE_ERR" "discard_no_common_ancestor"
                 fi
               fi
             else
               echo "    ❌ 无共同祖先 Discard commits 失败"
-              record_failure "$branch" "无共同祖先 PATCH force update 失败" "discard" "$ORPHAN_DISCARD_API" "$ORPHAN_DISCARD_ERR" "discard_no_common_ancestor"
+              record_failure "$branch" "$NO_COMMON_ANCESTOR_REASON; PATCH force update 失败" "discard" "$ORPHAN_DISCARD_API" "$ORPHAN_DISCARD_ERR" "discard_no_common_ancestor"
             fi
           else
             echo "    🛑 无共同祖先备份分支创建失败,跳过该分支同步"
             log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" backup_branch="$ORPHAN_BACKUP_BRANCH" reason="无共同祖先备份分支创建失败" api_message="$(api_error_message "$ORPHAN_BACKUP_ERR")" api_status="$(api_error_field "$ORPHAN_BACKUP_ERR" "status")"
-            record_failure "$branch" "无共同祖先备份未完成" "backup_ref" "$ORPHAN_BACKUP_API" "$ORPHAN_BACKUP_ERR" "discard_no_common_ancestor"
+            record_failure "$branch" "$NO_COMMON_ANCESTOR_REASON; 备份未完成" "backup_ref" "$ORPHAN_BACKUP_API" "$ORPHAN_BACKUP_ERR" "discard_no_common_ancestor"
           fi
         else
           record_failure "$branch" "compare 异常" "compare" "$COMPARE_API" "$COMPARE_ERR" "auto"
