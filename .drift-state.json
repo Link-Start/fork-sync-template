@@ -2,10 +2,10 @@
   "forks": {
     "douyin_erma0": {
       "last_result": "skip",
-      "last_ts": "2026-06-08T12:20:16.348Z",
+      "last_ts": "2026-06-08T12:31:56.966Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     }
   },
-  "updated_at": "2026-06-08T12:20:16Z"
+  "updated_at": "2026-06-08T12:31:57Z"
 }
