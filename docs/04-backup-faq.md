@@ -15,9 +15,9 @@ backup/20260602-153045-abc1234
 
 ## 🛡️ 本地修改自动备份(local-backup 分支)
 
-**场景**:你在 fork 上某个分支直接改了东西(比如 `master` 上有 1-2 个本地 commit),忘了建独立分支。下次 sync 时,workflow 会检测到 fork 比 upstream ahead/diverged,然后 PATCH --force 覆盖。
+**场景**:你在 fork 上某个分支直接改了东西(比如 `master` 上有 1-2 个本地 commit),忘了建独立分支。等 upstream 也有新 commit 时,workflow 会检测到 fork 和 upstream 分歧,需要处理本地提交。
 
-**新版防护**:在 PATCH --force 之前,workflow 自动把 fork 当前 SHA 存到一个**备份分支**:
+**新版防护**:workflow 会先判断是否需要备份,再把 fork 当前 SHA 存到一个**备份分支**:
 
 ```
 local-backup/master-20260603-153045-a1b2c3d
@@ -25,10 +25,12 @@ local-backup/master-20260603-153045-a1b2c3d
 ```
 
 - 命名规则:`local-backup/{原分支名}-{YYYYMMDD-HHMMSS}-{原 SHA 7 位}`
-- 触发条件:分支 `compare.status` 是 `ahead` 或 `diverged`,且 `ahead_by > 0`
-- 创建时机:在 PATCH --force 之前
+- 触发条件:upstream 有新增(`behind_by > 0`)且 fork 有本地提交(`ahead_by > 0`)
+- 不触发条件:纯 `ahead`(`behind_by = 0`)表示 upstream 没有新增,workflow 会跳过,不备份也不写分支
+- 去重规则:如果最近的 `local-backup/*` 分支和当前 fork 分支相对 upstream 的本地 patch 一样,跳过新备份
+- 创建时机:在 force 对齐或 `merge-upstream` 前
 - **不自动清理** — 本地修改是你的数据,不像 backup tag 那样只保留 20 个
-- 即使 sync 失败,备份分支已经创建了,数据已经安全
+- 如果本次需要备份但备份分支创建失败,该分支会跳过同步,避免在未备份时丢失本地修改
 
 ### 怎么找回本地修改
 
@@ -49,18 +51,41 @@ git cherry-pick <commit-sha>  # 挑你想要的 commit 过来
 
 ### 怎么清理 local-backup 分支
 
-- **GitHub 网页**:进 fork → branches → 找 `local-backup/` 开头的 → 一个个删
-- **命令行**:
-  ```bash
-  # 列出所有 local-backup 分支
-  git branch -r | grep 'origin/local-backup' | sed 's|origin/||' | xargs -I {} git push origin --delete {}
-  ```
-- **API** (用 gh cli 批量):
-  ```bash
-  gh api repos/<你的用户名>/<fork名>/git/refs/heads/local-backup \
-    --jq '.[] | .ref' | \
-    xargs -I {} gh api -X DELETE repos/<你的用户名>/<fork名>/git/{}
-  ```
+推荐用 `Cleanup Local Backup Branches` 手动 workflow 清理。它有三层保护:
+
+- 只读取 `refs/heads/local-backup/` 下的分支
+- 删除前强制校验分支名必须匹配 `local-backup/*-YYYYMMDD-HHMMSS-sha7`
+- 默认 `dry_run=true`,实际删除必须填 `confirm=delete-local-backup`
+
+常用模式:
+
+| 你想做什么 | mode | 需要填什么 |
+|---|---|---|
+| 只列出备份分支 | `list` | `fork` |
+| 删除全部备份分支 | `delete_all` | `fork`,确认后再设 `dry_run=false` |
+| 删除一个或多个指定备份 | `delete_by_name` | `backup_branches` 填一个或多个 `local-backup/...`,逗号或换行分隔 |
+| 删除某个原分支的全部备份 | `delete_by_source_branch` | `source_branch` 填原分支名,如 `master` |
+| 删除多余备份,每个原分支只保留最近 N 个 | `delete_keep_latest` | `keep_latest`,可选 `source_branch` |
+
+建议流程:
+
+1. 先用 `list` 看当前备份分支。
+2. 选择删除模式,保持 `dry_run=true` 预览待删除列表。
+3. 确认无误后再改成 `dry_run=false`,并填写 `confirm=delete-local-backup`。
+
+示例:
+
+```text
+fork: my-fork
+mode: delete_by_name
+backup_branches:
+  local-backup/master-20260603-153045-a1b2c3d
+  local-backup/dev-20260604-090000-d4e5f6a
+dry_run: false
+confirm: delete-local-backup
+```
+
+这个 workflow 不会删除 `main`、`master`、`dev`、`sync-upstream/*`、`restore-from-backup/*` 等非 `local-backup/*` 备份分支。即使手动输入了这些分支名,也会被安全校验拦截。
 
 ### 跟 backup tag 的区别
 
@@ -68,9 +93,9 @@ git cherry-pick <commit-sha>  # 挑你想要的 commit 过来
 |---|---|---|
 | 存什么 | fork **默认分支**同步前的 SHA | fork 任意**有 ahead commit** 的分支同步前的 SHA |
 | 数量限制 | 最多 20 个,自动删 | 无限制,需要手动清理 |
-| 触发 | 每次 sync 默认分支前都建 | 仅当 ahead/diverged 时建 |
+| 触发 | 每次 sync 默认分支前都建 | 仅当 upstream 有新增且 fork 有本地提交时建,相同本地 patch 不重复建 |
 | 用途 | 整个 fork 回退 | 找回本地修改 |
-| 清理 | 自动 | 手动 |
+| 清理 | 自动 | 手动 workflow |
 
 **两者不冲突,各管各的**。
 

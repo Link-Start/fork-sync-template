@@ -16,6 +16,7 @@
 - ✅ 自动检测 fork 的"超前/落后"状态
 - ✅ 支持所有分支同步 (不只默认分支)
 - ✅ 自动 backup tag (最多保留 20 个)
+- ✅ 手动安全清理 local-backup 备份分支
 - ✅ master / main 双默认分支兼容
 - ✅ 上游删库 / archived 友好 skip
 - ✅ 新分支自动拉,旧分支自动保
@@ -32,7 +33,8 @@ fork-sync-template/
 │   └── workflows/
 │       ├── sync-dynamic.yml          # ✅ 作者日常使用配置 (默认排除 claude 相关 fork)
 │       ├── health-check.yml          # 独立健康检查
-│       └── rollback.yml              # 手动回滚 backup tag
+│       ├── rollback.yml              # 手动回滚 backup tag
+│       └── cleanup-local-backups.yml # 安全清理 local-backup 备份分支
 ├── examples/                          # 两种风格的通用模板 (fork 后不会被自动跑)
 │   ├── sync-dynamic.yml              # 通用动态发现 (排除 pattern 为空,同步所有 fork)
 │   └── sync-static.yml               # 通用静态 matrix (需要手写 fork 列表)
@@ -180,17 +182,20 @@ fork-sync-template/
 
 ## 🛡️ 本地修改自动备份 (local-backup 分支)
 
-**场景**:你在 fork 的某个分支(比如 `master`)直接改了东西,忘了建独立分支。下次 sync 会把你的本地 commit 覆盖掉。
+**场景**:你在 fork 的某个分支(比如 `master`)直接改了东西,忘了建独立分支。等 upstream 也有新 commit 时,下一次 sync 需要处理“upstream 新增 + fork 本地提交”的分歧。
 
-**新版防护**:在 PATCH --force 之前,workflow 自动把 fork 当前 SHA 存到:
+**新版防护**:workflow 会先判断是否真的需要备份,再把 fork 当前 SHA 存到:
 
 ```
 local-backup/master-20260603-153045-a1b2c3d
    └─固定前缀   └─原分支名 └─时间戳   └─原 SHA 前 7 位
 ```
 
-- 仅在 `ahead` / `diverged` 且 `ahead_by > 0` 时创建
+- upstream 没有新增(`behind_by = 0`)时跳过,不备份也不写分支
+- 仅在 upstream 有新增(`behind_by > 0`)且 fork 有本地提交(`ahead_by > 0`)时创建
+- 如果最近的 `local-backup/*` 已经包含相同本地 patch,跳过新备份
 - **不自动清理**(本地数据是你自己的,不像 backup tag 自动保留 20 个)
+- 清理方法:用 `Cleanup Local Backup Branches` workflow,只允许删标准 `local-backup/*` 备份分支
 - 找回方法:`git checkout local-backup/master-...` → 找 commit → cherry-pick 到新分支
 
 详见 [docs/04-backup-faq.md](docs/04-backup-faq.md) 的"本地修改自动备份"章节。

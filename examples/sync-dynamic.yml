@@ -72,7 +72,7 @@ on:
           - 'true'
           - 'false'
       sync_mode:
-        description: '同步模式 (auto = 直接 force-patch;pr = 开 PR 让人审,只对 behind 状态有效)'
+        description: '同步模式 (auto = 自动同步;pr = 开 PR 让人审,只对 behind 状态有效)'
         required: false
         default: 'auto'
         type: choice
@@ -92,6 +92,14 @@ on:
           - slack
           - dingtalk
           - generic
+      discard_local_changes:
+        description: 'upstream 有新增且 fork 有本地提交时的处理方式'
+        required: false
+        default: 'force'
+        type: choice
+        options:
+          - force
+          - keep
 
 # 显式声明需要写权限
 permissions:
@@ -114,6 +122,11 @@ jobs:
       # 通用模板默认不豁免 size 检查,让 forker 手动触发时填
       # 推荐 1KB CLI 工具之类的小项目加这里
       DEFAULT_SIZE_CHECK_EXEMPT: ''
+      # upstream 有新增且 fork 有本地提交时的处理方式
+      # force = 去重备份本地修改后,force push 和 upstream 完全一致 (默认)
+      # keep  = 去重备份本地修改后,使用 merge-upstream 合并上游更新
+      # 纯 ahead 且 upstream 无新增时跳过,不备份也不写分支
+      DEFAULT_DISCARD_LOCAL_CHANGES: 'force'
     steps:
       # =====================================================================
       # Step 0: 准备共享函数
@@ -179,6 +192,9 @@ jobs:
 
       # =====================================================================
       # Step 0: 读 .github/sync-config.yml (用户配置文件,优先级: input > config > default)
+      # 支持的 key: exclude_pattern / exclude_repos / size_drop_threshold /
+      #            size_check_exempt / max_parallel / sync_mode / webhook_type /
+      #            discard_local_changes
       # =====================================================================
       - name: Read sync config
         id: read-config
@@ -200,7 +216,7 @@ jobs:
 
           echo "📄 找到 .github/sync-config.yml,加载覆盖:"
           for KEY in exclude_pattern exclude_repos size_drop_threshold size_check_exempt \
-                     max_parallel sync_mode webhook_type; do
+                     max_parallel sync_mode webhook_type discard_local_changes; do
             VAL=$(echo "$CONFIG_YAML" | grep -E "^${KEY}:" | head -1 \
                   | sed -E "s/^${KEY}:[[:space:]]*//" \
                   | sed 's/^["'"'"']//;s/["'"'"']$//' || echo "")
@@ -370,6 +386,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
           CONFIG_REPO: ${{ github.event.repository.name }}
+          DISCARD_LOCAL_CHANGES: ${{ inputs.discard_local_changes || env.CONFIG_DISCARD_LOCAL_CHANGES || env.DEFAULT_DISCARD_LOCAL_CHANGES }}
         run: |
           set -e
           # 共享函数:gh_api_with_retry / gh_api_write / log_event
@@ -401,6 +418,18 @@ jobs:
             echo "::warning::size_drop_threshold='$SIZE_DROP_THRESHOLD' 非法,回退到 0.10"
             SIZE_DROP_THRESHOLD=0.10
           fi
+          DISCARD_LOCAL_CHANGES_RAW="${DISCARD_LOCAL_CHANGES:-force}"
+          DISCARD_LOCAL_CHANGES=$(printf '%s' "$DISCARD_LOCAL_CHANGES_RAW" \
+            | sed -E 's/[[:space:]]+#.*$//; s/^ +| +$//g' \
+            | tr '[:upper:]' '[:lower:]')
+          case "$DISCARD_LOCAL_CHANGES" in
+            force|keep) ;;
+            *)
+              echo "::warning::discard_local_changes='$DISCARD_LOCAL_CHANGES_RAW' 非法,回退到 force"
+              DISCARD_LOCAL_CHANGES=force
+              ;;
+          esac
+          echo "🧭 本地分歧处理模式: $DISCARD_LOCAL_CHANGES"
 
           SKIP_LIST=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/skip.txt" \
                       --jq '.content // ""' 2>/dev/null \
@@ -461,6 +490,79 @@ jobs:
                 --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                 '{name: $name, result: $result, reason: $reason, new: $new, synced: $synced, failed: $failed, skipped: $skipped, local_backup: $local_backup, ts: $ts}' \
                 >> "$RUNNER_TEMP/summary.jsonl"
+            }
+
+            latest_local_backup_branch() {
+              local source_branch="$1"
+              local prefix="local-backup/${source_branch}-"
+              gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/matching-refs/heads/$prefix" \
+                --jq '.[].ref' 2>/dev/null \
+                | sed 's|^refs/heads/||' \
+                | awk -v prefix="$prefix" 'index($0, prefix) == 1 {
+                    rest = substr($0, length(prefix) + 1)
+                    if (rest ~ /^[0-9]{8}-[0-9]{6}-[0-9a-f]{7}$/) print
+                  }' \
+                | sort -r \
+                | head -1 || true
+            }
+
+            fetch_ref_for_signature() {
+              local repo_dir="$1"
+              local remote="$2"
+              local source_ref="$3"
+              local target_ref="$4"
+              local auth_header="$5"
+
+              git -C "$repo_dir" -c http.extraheader="$auth_header" fetch --quiet --no-tags --depth=1000 \
+                "$remote" "$source_ref:$target_ref"
+            }
+
+            local_changes_signature() {
+              local repo_dir="$1"
+              local upstream_ref="$2"
+              local head_ref="$3"
+              local base sig
+              base=$(git -C "$repo_dir" merge-base "$upstream_ref" "$head_ref") || return 1
+              sig=$(git -C "$repo_dir" diff --find-renames "$base" "$head_ref" \
+                    | git -C "$repo_dir" patch-id --stable \
+                    | awk '{print $1}' \
+                    | sort \
+                    | paste -sd, -)
+              printf '%s\n' "${sig:-empty}"
+            }
+
+            local_backup_matches_current_changes() {
+              local source_branch="$1"
+              local backup_branch="$2"
+              local tmp auth_header current_sig backup_sig
+              tmp=$(mktemp -d) || return 2
+              auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+
+              git -C "$tmp" init -q || { rm -rf "$tmp"; return 2; }
+              git -C "$tmp" remote add fork "https://github.com/$FORK_OWNER/$FORK_REPO.git"
+              git -C "$tmp" remote add upstream "https://github.com/$UPSTREAM_OWNER/$UPSTREAM_REPO.git"
+
+              if ! fetch_ref_for_signature "$tmp" fork "refs/heads/$source_branch" refs/sync/current "$auth_header" || \
+                 ! fetch_ref_for_signature "$tmp" fork "refs/heads/$backup_branch" refs/sync/backup "$auth_header"; then
+                rm -rf "$tmp"
+                return 2
+              fi
+              if ! fetch_ref_for_signature "$tmp" upstream "refs/heads/$source_branch" refs/sync/upstream "$auth_header"; then
+                rm -rf "$tmp"
+                return 2
+              fi
+
+              current_sig=$(local_changes_signature "$tmp" refs/sync/upstream refs/sync/current) || {
+                rm -rf "$tmp"
+                return 2
+              }
+              backup_sig=$(local_changes_signature "$tmp" refs/sync/upstream refs/sync/backup) || {
+                rm -rf "$tmp"
+                return 2
+              }
+              rm -rf "$tmp"
+
+              [ "$current_sig" = "$backup_sig" ]
             }
 
             echo ""
@@ -602,24 +704,60 @@ jobs:
               AHEAD=$(echo "$COMPARE_JSON" | jq -r '.ahead // 0')
               BEHIND=$(echo "$COMPARE_JSON" | jq -r '.behind // 0')
 
+              # upstream 没有新增时,纯 ahead 是 fork 本地独有提交,无需备份/同步。
+              if { [ "$STATUS" = "ahead" ] || [ "$STATUS" = "diverged" ]; } && \
+                 [ "$AHEAD" -gt 0 ] && [ "${BEHIND:-0}" -eq 0 ]; then
+                echo "    ⏭️ 本地超前 $AHEAD commit,上游无新增,无需备份/同步"
+                SKIPPED+=("$branch")
+                log_event "$FORK_REPO" "sync_branch" "skip" branch="$branch" ahead="$AHEAD" behind="$BEHIND" reason="上游无新增"
+                continue
+              fi
+
               # 3.4.0 本地修改自动备份
-              # 当 fork 有 ahead commit (本地修改过) 且即将被 PATCH --force 覆盖时,
-              # 先把 fork 当前 SHA 存到 local-backup/{branch}-{时间戳}-{sha7} 命名分支
-              # 用户即使不知道改了也能找回,本地 clone 也还在
-              if [ "$STATUS" = "ahead" ] || [ "$STATUS" = "diverged" ]; then
-                if [ "$AHEAD" -gt 0 ] && [ -n "$FORK_SHA" ]; then
-                  local BACKUP_BRANCH
+              # 只在 upstream 有新增且 fork 有本地 commit 时备份;已有相同本地 patch 备份则跳过。
+              if { [ "$STATUS" = "ahead" ] || [ "$STATUS" = "diverged" ]; } && \
+                 [ "$AHEAD" -gt 0 ] && [ "${BEHIND:-0}" -gt 0 ] && [ -n "$FORK_SHA" ]; then
+                local BACKUP_BRANCH LATEST_BACKUP SHOULD_CREATE_BACKUP BACKUP_READY BACKUP_COMPARE_RC
+                SHOULD_CREATE_BACKUP=true
+                BACKUP_READY=false
+                LATEST_BACKUP=$(latest_local_backup_branch "$branch")
+
+                if [ -n "$LATEST_BACKUP" ]; then
+                  if local_backup_matches_current_changes "$branch" "$LATEST_BACKUP"; then
+                    echo "    📦 已有相同本地修改备份: $LATEST_BACKUP,跳过新备份"
+                    log_event "$FORK_REPO" "local_backup" "skip" branch="$branch" backup_branch="$LATEST_BACKUP" ahead="$AHEAD" behind="$BEHIND" reason="已有相同本地改动备份"
+                    SHOULD_CREATE_BACKUP=false
+                    BACKUP_READY=true
+                  else
+                    BACKUP_COMPARE_RC=$?
+                    if [ "$BACKUP_COMPARE_RC" -eq 1 ]; then
+                      echo "    📦 本地修改不同于最近备份: $LATEST_BACKUP,创建新备份"
+                    else
+                      echo "    ⚠️ 无法比较最近备份: $LATEST_BACKUP,保守创建新备份"
+                      log_event "$FORK_REPO" "local_backup" "warn" branch="$branch" backup_branch="$LATEST_BACKUP" ahead="$AHEAD" behind="$BEHIND" reason="备份比较失败"
+                    fi
+                  fi
+                fi
+
+                if [ "$SHOULD_CREATE_BACKUP" = "true" ]; then
                   BACKUP_BRANCH="local-backup/${branch}-$(date +%Y%m%d-%H%M%S)-${FORK_SHA:0:7}"
                   if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/git/refs" \
                        -f ref="refs/heads/$BACKUP_BRANCH" \
                        -f sha="$FORK_SHA" >/dev/null 2>&1; then
                     echo "    📦 本地修改备份: $BACKUP_BRANCH (含 $AHEAD 个 commit)"
                     LOCAL_BACKED_UP+=("$branch:$BACKUP_BRANCH")
-                    log_event "$FORK_REPO" "local_backup" "ok" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD"
+                    BACKUP_READY=true
+                    log_event "$FORK_REPO" "local_backup" "ok" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD" behind="$BEHIND"
                   else
-                    echo "    ⚠️ 备份分支创建失败,继续 sync (本地修改可能丢失)"
-                    log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" reason="备份分支创建失败"
+                    echo "    🛑 备份分支创建失败,跳过该分支同步以避免丢失本地修改"
+                    log_event "$FORK_REPO" "local_backup" "fail" branch="$branch" backup_branch="$BACKUP_BRANCH" ahead="$AHEAD" behind="$BEHIND" reason="备份分支创建失败"
                   fi
+                fi
+
+                if [ "$BACKUP_READY" != "true" ]; then
+                  FAILED+=("$branch")
+                  log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" ahead="$AHEAD" behind="$BEHIND" reason="本地修改备份未完成"
+                  continue
                 fi
               fi
 
@@ -674,15 +812,30 @@ jobs:
                   fi
                   ;;
                 ahead|diverged)
-                  if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
-                       -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
-                    echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
-                    SYNCED+=("$branch")
-                    log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="force" ahead="$AHEAD" behind="$BEHIND"
+                  if [ "$DISCARD_LOCAL_CHANGES" = "force" ]; then
+                    # force 模式: 去重备份 + force push 丢弃本地修改
+                    if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
+                         -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                      echo "    ⏩ 丢弃 $AHEAD + 拉入 $BEHIND → ${UPSTREAM_SHA:0:7}"
+                      SYNCED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="force" ahead="$AHEAD" behind="$BEHIND"
+                    else
+                      echo "    ❌ PATCH 失败"
+                      FAILED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="force" reason="PATCH 失败"
+                    fi
                   else
-                    echo "    ❌ PATCH 失败"
-                    FAILED+=("$branch")
-                    log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="force" reason="PATCH 失败"
+                    # keep 模式: 去重备份 + 用 merge-upstream 合并上游更新，保留本地改动
+                    if gh_api_write -X POST "repos/$FORK_OWNER/$FORK_REPO/merge-upstream" \
+                         -f branch="$branch" >/dev/null 2>&1; then
+                      echo "    🔀 保留本地 $AHEAD commit，merge upstream $BEHIND commit → ${UPSTREAM_SHA:0:7}"
+                      SYNCED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="keep" ahead="$AHEAD" behind="$BEHIND"
+                    else
+                      echo "    ❌ merge-upstream 失败"
+                      FAILED+=("$branch")
+                      log_event "$FORK_REPO" "sync_branch" "fail" branch="$branch" mode="keep" reason="merge-upstream 失败"
+                    fi
                   fi
                   ;;
                 *)
@@ -719,7 +872,7 @@ jobs:
             write_fork_summary "ok"
           }
           export -f process_fork
-          export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST
+          export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST DISCARD_LOCAL_CHANGES
 
           # API 限流检查:剩余配额 = 0 时睡到 reset
           # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查

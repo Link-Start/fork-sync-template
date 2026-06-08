@@ -56,11 +56,12 @@ force-PATCH master 到 upstream 的 SHA
 
 ### 为什么放 fork 自己会自毁
 
-yml 的设计是「把 fork 强制同步到 upstream 一模一样」,逻辑里看到 fork 比 upstream 超前就会丢弃超前 commit。
+yml 的设计是「用一个独立配置仓库去同步目标 fork」。如果把 yml 放在 fork 本身,yml 文件会变成 fork 的本地提交;纯 `ahead` 时现在会跳过,但只要 upstream 后续也有新增,默认 `discard_local_changes: force` 仍会在备份后把 fork 对齐 upstream,这个 workflow 文件会被移走。
 
 如果把 yml 放在 fork 本身:
 - yml 本身就是 fork 比 upstream 多出来的那个 commit
-- workflow 第一次跑 → 检测到 ahead by 1 → 丢弃这个 yml 文件
+- workflow 遇到纯 `ahead` → 暂时跳过
+- upstream 后续新增 commit → 分支变成 `diverged` → 默认 force 对齐 upstream,这个 yml 文件被移走
 - 下次再跑 → yml 已经没了 → 整个机制消失
 
 ### 非 fork 仓库天然解决两个 fork 上的麻烦

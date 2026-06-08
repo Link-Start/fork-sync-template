@@ -25,9 +25,10 @@ mkdir -p .github/workflows
 # 1.3 拷贝 workflow
 cp /path/to/fork-sync-template/.github/workflows/sync-dynamic.yml .github/workflows/
 
-# 可选:一并拷贝健康检查/回滚按钮
+# 可选:一并拷贝健康检查/回滚/备份分支清理按钮
 cp /path/to/fork-sync-template/.github/workflows/health-check.yml .github/workflows/
 cp /path/to/fork-sync-template/.github/workflows/rollback.yml .github/workflows/
+cp /path/to/fork-sync-template/.github/workflows/cleanup-local-backups.yml .github/workflows/
 
 # 可选:本地配置示例
 cp /path/to/fork-sync-template/.github/sync-config.yml.example .github/sync-config.yml
@@ -65,6 +66,7 @@ env:
   DEFAULT_SIZE_DROP_THRESHOLD: '0.10'      # 上游体积暴减阈值
   DEFAULT_MAX_PARALLEL: '4'                # 并发数
   DEFAULT_SIZE_CHECK_EXEMPT: ''            # size 检查豁免 fork 名,逗号分隔
+  DEFAULT_DISCARD_LOCAL_CHANGES: 'force'   # upstream 有新增且 fork 有本地提交时的处理方式
 ```
 
 **方式 B: 用 `.github/sync-config.yml` 覆盖默认值**
@@ -78,6 +80,7 @@ size_drop_threshold: 0.10
 size_check_exempt: ""
 max_parallel: 4
 sync_mode: auto
+discard_local_changes: force
 webhook_type: slack
 ```
 

@@ -2,7 +2,9 @@
 
 ### 场景 1: 我误改了 fork 的 master
 
-- **会发生什么**:下次 sync 时,`compare` 返回 `ahead` 或 `diverged`,workflow 在 PATCH --force 之前**自动**创建 `local-backup/master-{时间戳}-{sha7}` 分支保存你的本地 commit
+- **upstream 没有新增时**:`compare` 返回 `ahead`,workflow 会跳过,不备份也不写分支
+- **upstream 也有新增时**:`compare` 返回 `diverged`,workflow 会先检查最近的 `local-backup/*`;如果本地 patch 已经备份过就跳过新备份,否则创建 `local-backup/master-{时间戳}-{sha7}` 保存你的本地 commit
+- **之后怎么同步**:`discard_local_changes: force` 会在备份后强制对齐 upstream;`discard_local_changes: keep` 会在备份后尝试 `merge-upstream` 保留本地 commit
 - **怎么找回**:
   1. 简单:`git checkout local-backup/master-...-...` 看本地修改
   2. 完整:看 [04-backup-faq.md](04-backup-faq.md) 的"本地修改自动备份"章节

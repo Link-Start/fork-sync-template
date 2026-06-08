@@ -26,7 +26,8 @@
 | 排除 | 指定 fork 名排除 | `exclude_repos` (逗号分隔) |
 | 排除 | 上游 owner 过滤 | `upstream_owner_filter` |
 | 防护 | 体积暴减检测 (上游删源码防护) | `size_drop_threshold` (默认 0.10) |
-| 防护 | 本地修改自动备份 | ahead/diverged 时自动建 `local-backup/{branch}-{时间戳}-{sha7}` |
+| 防护 | 本地修改自动备份 | upstream 有新增且 fork 有本地提交时去重创建 `local-backup/{branch}-{时间戳}-{sha7}` |
+| 防护 | 备份分支安全清理 | 手动 workflow 只允许删除标准 `local-backup/*` 备份分支 |
 | 防护 | 默认分支 backup tag | 每次 sync 前建 `backup/{时间戳}-{sha7}`,最多保留 20 个 |
 
 ---

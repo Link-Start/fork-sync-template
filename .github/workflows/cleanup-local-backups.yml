@@ -1,0 +1,292 @@
+# =============================================================================
+# GitHub Fork Sync - 清理 local-backup 分支
+# =============================================================================
+# 用途: 安全删除 fork 上的 local-backup/{branch}-{timestamp}-{sha7} 备份分支
+# 触发: workflow_dispatch 手动
+# 安全边界:
+#   - 只读取 refs/heads/local-backup/ 下的分支
+#   - 删除前强制校验分支名必须匹配 local-backup/*-YYYYMMDD-HHMMSS-sha7
+#   - 默认 dry-run,实际删除必须填确认短语 delete-local-backup
+# =============================================================================
+
+name: Cleanup Local Backup Branches
+
+on:
+  workflow_dispatch:
+    inputs:
+      fork:
+        description: '目标 fork 仓库名 (例: my-fork)'
+        required: true
+        type: string
+      mode:
+        description: '清理模式'
+        required: true
+        type: choice
+        options:
+          - list
+          - delete_by_name
+          - delete_by_source_branch
+          - delete_keep_latest
+          - delete_all
+        default: list
+      backup_branches:
+        description: 'delete_by_name: 一个或多个备份分支名,用逗号或换行分隔'
+        required: false
+        type: string
+        default: ''
+      source_branch:
+        description: 'delete_by_source_branch/delete_keep_latest: 原分支名,如 master'
+        required: false
+        type: string
+        default: ''
+      keep_latest:
+        description: 'delete_keep_latest: 每个原分支保留最近 N 个备份'
+        required: false
+        type: string
+        default: '3'
+      dry_run:
+        description: 'true=只预览;false=实际删除'
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+        default: 'true'
+      confirm:
+        description: '实际删除时必须填 delete-local-backup'
+        required: false
+        type: string
+        default: 'no'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      MY_OWNER: ${{ github.repository_owner }}
+      GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+      FORK: ${{ inputs.fork }}
+      MODE: ${{ inputs.mode }}
+      BACKUP_BRANCHES: ${{ inputs.backup_branches }}
+      SOURCE_BRANCH: ${{ inputs.source_branch }}
+      KEEP_LATEST: ${{ inputs.keep_latest }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Cleanup local-backup branches
+        run: |
+          set -euo pipefail
+
+          if [ -z "$FORK" ]; then
+            echo "::error::fork 不能为空"
+            exit 1
+          fi
+
+          is_backup_branch() {
+            local branch="$1"
+            case "$branch" in
+              local-backup/*) ;;
+              *) return 1 ;;
+            esac
+            [[ "$branch" =~ ^local-backup/.+-[0-9]{8}-[0-9]{6}-[0-9a-fA-F]{7}$ ]]
+          }
+
+          normalize_backup_name() {
+            local raw="$1"
+            printf '%s' "$raw" \
+              | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s|^refs/heads/||; s|^origin/||'
+          }
+
+          source_from_backup() {
+            local branch="$1"
+            printf '%s\n' "$branch" \
+              | sed -E 's|^local-backup/(.*)-[0-9]{8}-[0-9]{6}-[0-9a-fA-F]{7}$|\1|'
+          }
+
+          matches_source_branch_backup() {
+            local branch="$1"
+            local source_branch="$2"
+            local prefix rest
+            prefix="local-backup/${source_branch}-"
+            case "$branch" in
+              "$prefix"*) ;;
+              *) return 1 ;;
+            esac
+            rest="${branch#"$prefix"}"
+            [[ "$rest" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-fA-F]{7}$ ]]
+          }
+
+          list_backup_branches() {
+            gh api "repos/$MY_OWNER/$FORK/git/matching-refs/heads/local-backup/" \
+              --jq '.[].ref' 2>/dev/null \
+              | sed 's|^refs/heads/||' \
+              | while IFS= read -r branch; do
+                  if is_backup_branch "$branch"; then
+                    printf '%s\n' "$branch"
+                  else
+                    echo "::warning::忽略非标准备份分支: $branch" >&2
+                  fi
+                done \
+              | sort
+          }
+
+          branch_exists() {
+            local wanted="$1"
+            local branch
+            for branch in "${BACKUPS[@]}"; do
+              if [ "$branch" = "$wanted" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          add_candidate() {
+            local branch="$1"
+            if ! is_backup_branch "$branch"; then
+              echo "::error::安全拦截: '$branch' 不是标准 local-backup 备份分支"
+              exit 1
+            fi
+            if ! branch_exists "$branch"; then
+              echo "::warning::备份分支不存在,跳过: $branch"
+              return 0
+            fi
+            CANDIDATES+=("$branch")
+          }
+
+          dedupe_candidates() {
+            local branch
+            declare -A seen=()
+            for branch in "${CANDIDATES[@]}"; do
+              if [ -z "${seen[$branch]+x}" ]; then
+                seen["$branch"]=1
+                printf '%s\n' "$branch"
+              fi
+            done
+          }
+
+          mapfile -t BACKUPS < <(list_backup_branches)
+          CANDIDATES=()
+
+          echo "🔍 目标 fork: $MY_OWNER/$FORK"
+          echo "🧭 清理模式: $MODE"
+          echo "🧪 dry_run: $DRY_RUN"
+          echo ""
+
+          if [ "${#BACKUPS[@]}" -eq 0 ]; then
+            echo "📭 没有找到标准 local-backup 备份分支"
+            exit 0
+          fi
+
+          if [ "$MODE" = "list" ]; then
+            echo "📋 当前 local-backup 备份分支:"
+            printf '  - %s\n' "${BACKUPS[@]}"
+            exit 0
+          fi
+
+          case "$MODE" in
+            delete_all)
+              for branch in "${BACKUPS[@]}"; do
+                add_candidate "$branch"
+              done
+              ;;
+            delete_by_name)
+              if [ -z "$BACKUP_BRANCHES" ]; then
+                echo "::error::delete_by_name 需要填写 backup_branches"
+                exit 1
+              fi
+              while IFS= read -r raw; do
+                branch=$(normalize_backup_name "$raw")
+                [ -z "$branch" ] && continue
+                add_candidate "$branch"
+              done < <(printf '%s\n' "$BACKUP_BRANCHES" | tr ',' '\n')
+              ;;
+            delete_by_source_branch)
+              if [ -z "$SOURCE_BRANCH" ]; then
+                echo "::error::delete_by_source_branch 需要填写 source_branch"
+                exit 1
+              fi
+              for branch in "${BACKUPS[@]}"; do
+                if matches_source_branch_backup "$branch" "$SOURCE_BRANCH"; then
+                  add_candidate "$branch"
+                fi
+              done
+              ;;
+            delete_keep_latest)
+              if ! [[ "$KEEP_LATEST" =~ ^[0-9]+$ ]]; then
+                echo "::error::keep_latest 必须是非负整数,当前: $KEEP_LATEST"
+                exit 1
+              fi
+              if [ -n "$SOURCE_BRANCH" ]; then
+                count=0
+                while IFS= read -r branch; do
+                  [ -z "$branch" ] && continue
+                  if matches_source_branch_backup "$branch" "$SOURCE_BRANCH"; then
+                    count=$((count + 1))
+                    if [ "$count" -gt "$KEEP_LATEST" ]; then
+                      add_candidate "$branch"
+                    fi
+                  fi
+                done < <(printf '%s\n' "${BACKUPS[@]}" | sort -r)
+              else
+                declare -A seen_by_source=()
+                while IFS= read -r branch; do
+                  [ -z "$branch" ] && continue
+                  source=$(source_from_backup "$branch")
+                  seen_by_source["$source"]=$(( ${seen_by_source["$source"]:-0} + 1 ))
+                  if [ "${seen_by_source["$source"]}" -gt "$KEEP_LATEST" ]; then
+                    add_candidate "$branch"
+                  fi
+                done < <(printf '%s\n' "${BACKUPS[@]}" | sort -r)
+              fi
+              ;;
+            *)
+              echo "::error::未知 mode: $MODE"
+              exit 1
+              ;;
+          esac
+
+          mapfile -t CANDIDATES < <(dedupe_candidates)
+
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            echo "✅ 没有需要删除的备份分支"
+            exit 0
+          fi
+
+          echo "🗑️ 待删除的 local-backup 备份分支:"
+          printf '  - %s\n' "${CANDIDATES[@]}"
+          echo ""
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "🧪 dry-run 模式,不会删除任何分支"
+            echo "💡 确认无误后重新运行: dry_run=false,confirm=delete-local-backup"
+            exit 0
+          fi
+
+          if [ "$CONFIRM" != "delete-local-backup" ]; then
+            echo "::error::实际删除必须填 confirm=delete-local-backup"
+            exit 1
+          fi
+
+          for branch in "${CANDIDATES[@]}"; do
+            if ! is_backup_branch "$branch"; then
+              echo "::error::最终安全拦截: $branch 不是标准备份分支"
+              exit 1
+            fi
+            ref_path="heads/$branch"
+            case "$ref_path" in
+              heads/local-backup/*) ;;
+              *)
+                echo "::error::最终安全拦截: ref_path 非 local-backup: $ref_path"
+                exit 1
+                ;;
+            esac
+
+            gh api -X DELETE "repos/$MY_OWNER/$FORK/git/refs/$ref_path" >/dev/null
+            echo "✅ 已删除: $branch"
+          done
+
+          echo ""
+          echo "✅ 清理完成,共删除 ${#CANDIDATES[@]} 个 local-backup 备份分支"

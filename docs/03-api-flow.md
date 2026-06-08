@@ -103,7 +103,8 @@ gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/git/refs \
 │       有 → compare API 决策                   │
 │         identical  → 跳过                     │
 │         behind     → merge-upstream 快进      │
-│         ahead/diverged → PATCH 强制同步       │
+│         ahead      → upstream 无新增,跳过     │
+│         diverged   → 去重备份后 force/keep    │
 └────────────────┬─────────────────────────────┘
                  ↓
 ┌──────────────────────────────────────────────┐
@@ -131,11 +132,12 @@ gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/git/refs \
 |---|---|---|---|---|
 | `identical` | 完全一致 | 一模一样 | 跳过 | 啥都不做 |
 | `behind` | fork 落后 | upstream 多了 commit, fork 没动 | `merge-upstream` 快进 | **最干净,无 merge commit** |
-| `ahead` | fork 超前 | 你手动改了 fork, upstream 没动 | `PATCH force=true` 丢弃 | ⚠️ 你的改动会丢 |
-| `diverged` | 双向分歧 | 你改了 fork, upstream 也改了 | `PATCH force=true` 丢弃 + 拉入 | ⚠️ 你的改动会丢 |
+| `ahead` | fork 超前 | 你手动改了 fork, upstream 没动 | 跳过 | upstream 无新增,不备份也不写分支 |
+| `diverged` | 双向分歧 | 你改了 fork, upstream 也改了 | 去重备份后按 `discard_local_changes` 处理 | `force` 强制对齐;`keep` 尝试 `merge-upstream` |
 
-**"ahead" 和 "diverged" 状态都会丢你 fork 上的独有 commit**,这是"fork 严格镜像 upstream"的设计取舍。
+**只有 upstream 有新增且 fork 有本地提交时才会创建 `local-backup/*`**。如果最近备份里已经有相同本地 patch,不会重复创建备份分支。
 
 **想保留 fork 上的某些独有 commit**:
 - 把它们 commit 到 upstream 不会用的分支名 (比如 `local-my-changes`)
-- 或者用 backup tag 找回来(见 [04-backup-faq.md](04-backup-faq.md))
+- 或者把 `discard_local_changes` 设为 `keep`,让 workflow 在分歧时尝试保留本地 commit
+- 已经被 force 覆盖的本地 commit,用 `local-backup/*` 找回来(见 [04-backup-faq.md](04-backup-faq.md))
