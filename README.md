@@ -168,9 +168,12 @@ fork-sync-template/
 | 条件 | 行为 |
 |---|---|
 | fork < 50KB | 跳过检测 (避免误杀小项目) |
-| upstream 体积 = 0KB 且阈值 > 0 | **跳过整个 fork**,标注上游仓库为空或源码不可用 |
-| upstream 体积 < fork × `size_drop_threshold` | **跳过整个 fork**,打 `::error::` 红色警报 |
+| upstream 不可访问或 parent 丢失 | **先创建/复用 `local-backup/*` 保护备份,再跳过同步** |
+| upstream 体积 = 0KB 且阈值 > 0 | **先创建/复用 `local-backup/*` 保护备份,再跳过同步**,标注上游仓库为空或源码不可用 |
+| upstream 体积 < fork × `size_drop_threshold` | **先创建/复用 `local-backup/*` 保护备份,再跳过同步**,打 `::error::` 红色警报 |
 | upstream 体积 ≥ fork × `size_drop_threshold` | 通过,正常 sync |
+
+这些保护性跳过场景不会执行 merge、PATCH、Discard commits 或任何会改写 fork 分支的同步操作。
 
 **`size_drop_threshold` 可调** (默认 `0.10` = 10%):
 - `0.10` (默认) — 敏感,推荐大多数人

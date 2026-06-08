@@ -375,16 +375,18 @@ jobs:
               fork_name=$(echo "$fork_json" | jq -r '.name')
 
               if detail=$(gh_api_with_retry "repos/$fork_owner/$fork_name" 2>/dev/null); then
-                if echo "$detail" | jq -e '.fork == true and .parent != null' >/dev/null 2>&1; then
+                if echo "$detail" | jq -e '.fork == true' >/dev/null 2>&1; then
                   echo "$detail" | jq -c '{
                     name: .name,
                     fork_owner: .owner.login,
-                    parent_name: .parent.name,
-                    parent_owner: .parent.owner.login,
-                    parent_default_branch: .parent.default_branch
+                    fork_default_branch: (.default_branch // "main"),
+                    parent_name: (.parent.name // ""),
+                    parent_owner: (.parent.owner.login // ""),
+                    parent_default_branch: (.parent.default_branch // ""),
+                    upstream_unavailable_reason: (if .parent == null then "parent 信息不可用: 上游仓库可能已删除、私有化、改名或 fork 关系失效" else "" end)
                   }'
                 else
-                  echo "  ⚠️ $fork_owner/$fork_name: parent 信息不可用,跳过" >&2
+                  echo "  ⚠️ $fork_owner/$fork_name: 不是 fork 或 fork 信息不可用,跳过" >&2
                 fi
               else
                 echo "  ⚠️ $fork_owner/$fork_name: 仓库详情不可访问,跳过" >&2
@@ -540,7 +542,7 @@ jobs:
           process_fork() {
             local fork_b64="$1"
             local fork_json
-            local FORK_REPO UPSTREAM_OWNER UPSTREAM_REPO UPSTREAM_DEFAULT
+            local FORK_REPO UPSTREAM_OWNER UPSTREAM_REPO UPSTREAM_DEFAULT FORK_DEFAULT UPSTREAM_UNAVAILABLE_REASON
             local FORK_NAME
             fork_json=$(printf '%s' "$fork_b64" | base64 -d 2>/dev/null || echo "")
             if [ -z "$fork_json" ] || ! echo "$fork_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
@@ -558,6 +560,8 @@ jobs:
             UPSTREAM_OWNER=$(echo "$fork_json" | jq -r '.parent_owner')
             UPSTREAM_REPO=$(echo "$fork_json" | jq -r '.parent_name')
             UPSTREAM_DEFAULT=$(echo "$fork_json" | jq -r '.parent_default_branch')
+            FORK_DEFAULT=$(echo "$fork_json" | jq -r '.fork_default_branch // "main"')
+            UPSTREAM_UNAVAILABLE_REASON=$(echo "$fork_json" | jq -r '.upstream_unavailable_reason // empty')
             local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=() FAILURE_DETAILS=()
 
             first_json_line() {
@@ -724,6 +728,60 @@ jobs:
                 | head -1 || true
             }
 
+            ensure_protective_local_backup() {
+              local source_branch="$1" reason="$2"
+              local fork_sha fork_sha_err fork_sha_api backup_branch latest latest_sha
+              local backup_out backup_err backup_api
+              fork_sha_api="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$source_branch"
+              if ! gh_api_capture fork_sha fork_sha_err "$fork_sha_api" --jq '.object.sha'; then
+                fork_sha=""
+              fi
+              if [ -z "$fork_sha" ]; then
+                echo "    ❌ 保护备份失败: fork 分支不存在或不可读取 ($source_branch)"
+                record_failure "$source_branch" "保护备份失败: fork 分支不存在或不可读取" "fork_sha" "$fork_sha_api" "$fork_sha_err" "protective_backup"
+                return 1
+              fi
+
+              latest=$(latest_local_backup_branch "$source_branch")
+              if [ -n "$latest" ]; then
+                latest_sha=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$latest" \
+                             --jq '.object.sha' 2>/dev/null || echo "")
+                if [ "$latest_sha" = "$fork_sha" ]; then
+                  echo "    📦 已有同 SHA 保护备份: $latest → ${fork_sha:0:7}"
+                  LOCAL_BACKED_UP+=("$source_branch:$latest")
+                  log_event "$FORK_REPO" "local_backup" "skip" branch="$source_branch" backup_branch="$latest" reason="已有同 SHA 保护备份" sha="${fork_sha:0:7}"
+                  return 0
+                fi
+              fi
+
+              backup_branch="local-backup/${source_branch}-$(date +%Y%m%d-%H%M%S)-${fork_sha:0:7}"
+              backup_api="repos/$FORK_OWNER/$FORK_REPO/git/refs"
+              if gh_api_write_capture backup_out backup_err -X POST "$backup_api" \
+                   -f ref="refs/heads/$backup_branch" \
+                   -f sha="$fork_sha" >/dev/null 2>&1; then
+                echo "    📦 保护备份: $backup_branch → ${fork_sha:0:7}"
+                LOCAL_BACKED_UP+=("$source_branch:$backup_branch")
+                log_event "$FORK_REPO" "local_backup" "ok" branch="$source_branch" backup_branch="$backup_branch" reason="$reason" sha="${fork_sha:0:7}"
+                return 0
+              fi
+
+              echo "    ❌ 保护备份分支创建失败: $backup_branch"
+              log_event "$FORK_REPO" "local_backup" "fail" branch="$source_branch" backup_branch="$backup_branch" reason="$reason" api_status="$(api_error_field "$backup_err" "status")" api_message="$(api_error_message "$backup_err")"
+              record_failure "$source_branch" "保护备份分支创建失败" "protective_backup" "$backup_api" "$backup_err" "protective_backup"
+              return 1
+            }
+
+            protect_and_skip_fork() {
+              local reason="$1" detail="$2"
+              echo "  🛡️  $reason"
+              [ -n "$detail" ] && echo "  $detail"
+              ensure_protective_local_backup "$FORK_DEFAULT" "$reason" || true
+              log_event "$FORK_REPO" "protective_skip" "skip" reason="$reason" default_branch="$FORK_DEFAULT"
+              SKIPPED+=("$FORK_REPO")
+              write_fork_summary "skip" "$reason"
+              return 0
+            }
+
             fetch_ref_for_signature() {
               local repo_dir="$1"
               local remote="$2"
@@ -811,10 +869,9 @@ jobs:
 
             # ----- 阶段 1: 上游存活检查 -----
             if [ -z "$UPSTREAM_DEFAULT" ]; then
-              echo "::warning::上游不可访问 (删除/archived/私有化/网络故障),跳过"
-              log_event "$FORK_REPO" "upstream_check" "fail" reason="不可访问"
-              SKIPPED+=("$FORK_REPO")
-              write_fork_summary "skip" "上游不可访问"
+              echo "::warning::上游不可访问 (删除/私有化/改名/fork 关系失效),只备份 fork 后跳过"
+              log_event "$FORK_REPO" "upstream_check" "fail" reason="${UPSTREAM_UNAVAILABLE_REASON:-上游不可访问}"
+              protect_and_skip_fork "上游不可访问,已保护备份并跳过同步" "${UPSTREAM_UNAVAILABLE_REASON:-疑似源仓库已删除、私有化、改名或 token 无权限}"
               return 0
             fi
             log_event "$FORK_REPO" "upstream_check" "ok" upstream="$UPSTREAM_OWNER/$UPSTREAM_REPO" default_branch="$UPSTREAM_DEFAULT"
@@ -841,10 +898,8 @@ jobs:
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && \
                [ "$(awk "BEGIN {print ($SIZE_DROP_THRESHOLD > 0 && $UPSTREAM_SIZE <= 0) ? 1 : 0}")" = "1" ]; then
               echo "::error::🛑 危险: 上游仓库为空或源码不可用 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB,阈值 ${THRESHOLD_PCT}%)"
-              echo "  疑似上游删库/清空源码/只保留空历史,跳过本次同步"
               log_event "$FORK_REPO" "size_check" "skip" reason="上游仓库为空或源码不可用" fork_kb="$FORK_SIZE" upstream_kb="$UPSTREAM_SIZE" ratio_pct="0.0" threshold_pct="$THRESHOLD_PCT"
-              SKIPPED+=("$FORK_REPO")
-              write_fork_summary "skip" "上游仓库为空或源码不可用"
+              protect_and_skip_fork "上游仓库为空或源码不可用,已保护备份并跳过同步" "疑似上游删库/清空源码/只保留空历史"
               return 0
             fi
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
@@ -852,10 +907,8 @@ jobs:
               local RATIO
               RATIO=$(awk "BEGIN {printf \"%.1f\", $UPSTREAM_SIZE * 100 / $FORK_SIZE}")
               echo "::error::🛑 危险: 上游体积暴减 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB, 上游只剩 fork 的 ${RATIO}%,阈值 ${THRESHOLD_PCT}%)"
-              echo "  疑似上游删除了源码,只留下 README/说明文件,跳过本次同步"
               log_event "$FORK_REPO" "size_check" "skip" reason="上游体积暴减" fork_kb="$FORK_SIZE" upstream_kb="$UPSTREAM_SIZE" ratio_pct="$RATIO" threshold_pct="$THRESHOLD_PCT"
-              SKIPPED+=("$FORK_REPO")
-              write_fork_summary "skip" "上游体积暴减"
+              protect_and_skip_fork "上游体积暴减,已保护备份并跳过同步" "疑似上游删除了源码,只留下 README/说明文件"
               return 0
             fi
             if [ "$SKIP_SIZE_CHECK" = "true" ]; then
