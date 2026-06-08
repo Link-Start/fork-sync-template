@@ -826,7 +826,7 @@ jobs:
                       log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="merge" behind="$BEHIND"
                     else
                       if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
-                           -f sha="$UPSTREAM_SHA" -f force=true >/dev/null 2>&1; then
+                           -f sha="$UPSTREAM_SHA" -F force=true >/dev/null 2>&1; then
                         echo "    ⏪ 落后 $BEHIND → PATCH 兜底"
                         SYNCED+=("$branch")
                         log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="patch" behind="$BEHIND"
@@ -843,7 +843,7 @@ jobs:
                     # 等价于 GitHub 网页 Sync fork 里的 Discard commits: ref 必须指向 upstream SHA。
                     local VERIFY_SHA
                     if gh_api_write -X PATCH "repos/$FORK_OWNER/$FORK_REPO/git/refs/heads/$branch" \
-                         -f sha="$UPSTREAM_SHA" -f force=true >/dev/null; then
+                         -f sha="$UPSTREAM_SHA" -F force=true >/dev/null; then
                       VERIFY_SHA=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch" \
                                    --jq '.object.sha' 2>/dev/null || echo "")
                       if [ "$VERIFY_SHA" = "$UPSTREAM_SHA" ]; then

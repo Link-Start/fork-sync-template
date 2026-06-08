@@ -57,12 +57,12 @@ gh api repos/Link-Start/Spider_XHS_cv-cat/compare/cv-cat:Spider_XHS:master...mas
 
 ```bash
 gh api -X PATCH repos/Link-Start/Spider_XHS_cv-cat/git/refs/heads/master \
-  -f sha=abc1234 -f force=true
+  -f sha=abc1234 -F force=true
 ```
 
 **用途**:执行和 GitHub 网页 `Discard commits` 一样的最终状态,把 fork 分支 hard reset 到 upstream 分支 SHA
 **效果**:fork 独有 commit 会被丢弃;本 workflow 会先创建 `local-backup/*` 备份分支
-**关键参数**:`force=true` 允许非快进(会丢弃 fork 独有的 commit)
+**关键参数**:`-F force=true` 以布尔值传递 `force`,允许非快进(会丢弃 fork 独有的 commit)
 
 ---
 
