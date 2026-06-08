@@ -973,8 +973,8 @@ jobs:
 
             # ----- 阶段 3: 遍历 upstream 分支,逐个同步 -----
             local UPSTREAM_BRANCH_LIST UPSTREAM_BRANCH_ERR UPSTREAM_BRANCH_API
-            UPSTREAM_BRANCH_API="repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches"
-            if ! gh_api_capture UPSTREAM_BRANCH_LIST UPSTREAM_BRANCH_ERR "$UPSTREAM_BRANCH_API" \
+            UPSTREAM_BRANCH_API="repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/branches?per_page=100"
+            if ! gh_api_capture UPSTREAM_BRANCH_LIST UPSTREAM_BRANCH_ERR --paginate "$UPSTREAM_BRANCH_API" \
                  --jq '.[] | .name'; then
               UPSTREAM_BRANCH_LIST=""
             fi
@@ -985,7 +985,20 @@ jobs:
               return 0
             fi
 
-            for branch in $UPSTREAM_BRANCH_LIST; do
+            # GitHub branches API is paginated. Process the default branch first so
+            # a large upstream cannot starve main behind later pages.
+            UPSTREAM_BRANCH_LIST=$(printf '%s\n' "$UPSTREAM_BRANCH_LIST" | awk -v default="$UPSTREAM_DEFAULT" '
+              $0 == "" { next }
+              $0 == default { has_default = 1; next }
+              !seen[$0]++ { branches[++n] = $0 }
+              END {
+                if (default != "" && has_default) print default
+                for (i = 1; i <= n; i++) print branches[i]
+              }
+            ')
+
+            while IFS= read -r branch; do
+              [ -z "$branch" ] && continue
               echo "  ━━━ $branch ━━━"
 
               local UPSTREAM_SHA FORK_SHA UPSTREAM_SHA_ERR UPSTREAM_SHA_API
@@ -1239,7 +1252,7 @@ jobs:
                   fi
                   ;;
               esac
-            done
+            done <<< "$UPSTREAM_BRANCH_LIST"
 
             # ----- 阶段 4: 清理旧 backup tag -----
             local KEPT=20
