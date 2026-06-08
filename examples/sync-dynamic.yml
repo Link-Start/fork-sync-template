@@ -67,6 +67,34 @@ on:
         description: '最大并发数 (默认 4,推荐 2-8,过高会触发 API 限流)'
         required: false
         default: ''
+      max_branches_per_fork:
+        description: '每个 fork 最多同步 upstream 分支数 (默认 6;0 = 不限制)'
+        required: false
+        default: ''
+      skip_branch_patterns:
+        description: '跳过 upstream 分支 glob,逗号分隔 (默认跳过 backup/local-backup/sync-upstream/dependabot)'
+        required: false
+        default: ''
+      full_branch_sync_repos:
+        description: '这些 fork 同步全部 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
+        required: false
+        default: ''
+      branch_limit_6_repos:
+        description: '这些 fork 最多同步 6 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
+        required: false
+        default: ''
+      branch_limit_7_repos:
+        description: '这些 fork 最多同步 7 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
+        required: false
+        default: ''
+      branch_limit_8_repos:
+        description: '这些 fork 最多同步 8 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
+        required: false
+        default: ''
+      branch_limit_overrides:
+        description: '按仓库指定任意分支上限,格式 repo=12,owner/repo=20;0 = 不限制'
+        required: false
+        default: ''
       dry_run:
         description: '干跑模式 (true = 只看不动,只打 log 不真写,默认 false)'
         required: false
@@ -123,6 +151,20 @@ jobs:
       DEFAULT_SIZE_DROP_THRESHOLD: '0.10'
       # 通用模板默认并发数,forker 可调
       DEFAULT_MAX_PARALLEL: '4'
+      # 通用模板默认每个 fork 最多处理的 upstream 分支数
+      # 6 = 先处理默认分支 + 前 5 个其他分支,避免多分支仓库打爆 API
+      # 0 = 不限制 (只建议在单仓库测试或白名单里使用)
+      DEFAULT_MAX_BRANCHES_PER_FORK: '6'
+      # 默认跳过自动生成/备份类 upstream 分支
+      # 默认分支永远优先处理,不受这里影响
+      DEFAULT_SKIP_BRANCH_PATTERNS: 'backup/*,local-backup/*,sync-upstream/*,dependabot/*'
+      # 特定 fork 分支上限口子 (逗号分隔,支持 repo 或 owner/repo)
+      DEFAULT_FULL_BRANCH_SYNC_REPOS: ''
+      DEFAULT_BRANCH_LIMIT_6_REPOS: ''
+      DEFAULT_BRANCH_LIMIT_7_REPOS: ''
+      DEFAULT_BRANCH_LIMIT_8_REPOS: ''
+      # 任意 N 口子: repo=12,owner/repo=20;值为 0 表示该 repo 不限制
+      DEFAULT_BRANCH_LIMIT_OVERRIDES: ''
       # 通用模板默认不豁免 size 检查,让 forker 手动触发时填
       # 推荐 1KB CLI 工具之类的小项目加这里
       DEFAULT_SIZE_CHECK_EXEMPT: ''
@@ -286,7 +328,9 @@ jobs:
 
           echo "📄 找到 .github/sync-config.yml,加载覆盖:"
           for KEY in exclude_pattern exclude_repos size_drop_threshold size_check_exempt \
-                     max_parallel sync_mode webhook_type discard_local_changes; do
+                     max_parallel max_branches_per_fork skip_branch_patterns full_branch_sync_repos \
+                     branch_limit_6_repos branch_limit_7_repos branch_limit_8_repos \
+                     branch_limit_overrides sync_mode webhook_type discard_local_changes; do
             VAL=$(echo "$CONFIG_YAML" | grep -E "^${KEY}:" | head -1 \
                   | sed -E "s/^${KEY}:[[:space:]]*//" \
                   | sed 's/^["'"'"']//;s/["'"'"']$//' || echo "")
@@ -481,6 +525,13 @@ jobs:
           MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
           SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.CONFIG_SIZE_DROP_THRESHOLD || env.DEFAULT_SIZE_DROP_THRESHOLD }}
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}
+          MAX_BRANCHES_PER_FORK: ${{ inputs.max_branches_per_fork || env.CONFIG_MAX_BRANCHES_PER_FORK || env.DEFAULT_MAX_BRANCHES_PER_FORK }}
+          SKIP_BRANCH_PATTERNS: ${{ inputs.skip_branch_patterns || env.CONFIG_SKIP_BRANCH_PATTERNS || env.DEFAULT_SKIP_BRANCH_PATTERNS }}
+          FULL_BRANCH_SYNC_REPOS: ${{ inputs.full_branch_sync_repos || env.CONFIG_FULL_BRANCH_SYNC_REPOS || env.DEFAULT_FULL_BRANCH_SYNC_REPOS }}
+          BRANCH_LIMIT_6_REPOS: ${{ inputs.branch_limit_6_repos || env.CONFIG_BRANCH_LIMIT_6_REPOS || env.DEFAULT_BRANCH_LIMIT_6_REPOS }}
+          BRANCH_LIMIT_7_REPOS: ${{ inputs.branch_limit_7_repos || env.CONFIG_BRANCH_LIMIT_7_REPOS || env.DEFAULT_BRANCH_LIMIT_7_REPOS }}
+          BRANCH_LIMIT_8_REPOS: ${{ inputs.branch_limit_8_repos || env.CONFIG_BRANCH_LIMIT_8_REPOS || env.DEFAULT_BRANCH_LIMIT_8_REPOS }}
+          BRANCH_LIMIT_OVERRIDES: ${{ inputs.branch_limit_overrides || env.CONFIG_BRANCH_LIMIT_OVERRIDES || env.DEFAULT_BRANCH_LIMIT_OVERRIDES }}
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
           CONFIG_REPO: ${{ github.event.repository.name }}
@@ -516,6 +567,10 @@ jobs:
             echo "::warning::size_drop_threshold='$SIZE_DROP_THRESHOLD' 非法,回退到 0.10"
             SIZE_DROP_THRESHOLD=0.10
           fi
+          if ! printf '%s' "$MAX_BRANCHES_PER_FORK" | grep -Eq '^(0|[1-9][0-9]*)$'; then
+            echo "::warning::max_branches_per_fork='$MAX_BRANCHES_PER_FORK' 非法,回退到 6"
+            MAX_BRANCHES_PER_FORK=6
+          fi
           DISCARD_LOCAL_CHANGES_RAW="${DISCARD_LOCAL_CHANGES:-force}"
           DISCARD_LOCAL_CHANGES=$(printf '%s' "$DISCARD_LOCAL_CHANGES_RAW" \
             | sed -E 's/[[:space:]]+#.*$//; s/^ +| +$//g' \
@@ -528,6 +583,7 @@ jobs:
               ;;
           esac
           echo "🧭 本地分歧处理模式: $DISCARD_LOCAL_CHANGES"
+          echo "🌿 默认分支同步上限: $MAX_BRANCHES_PER_FORK (0 = 不限制)"
 
           SKIP_LIST=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/skip.txt" \
                       --jq '.content // ""' 2>/dev/null \
@@ -563,6 +619,51 @@ jobs:
             FORK_DEFAULT=$(echo "$fork_json" | jq -r '.fork_default_branch // "main"')
             UPSTREAM_UNAVAILABLE_REASON=$(echo "$fork_json" | jq -r '.upstream_unavailable_reason // empty')
             local SYNCED=() FAILED=() NEW=() SKIPPED=() LOCAL_BACKED_UP=() FAILURE_DETAILS=()
+
+            csv_lines() {
+              printf '%s' "$1" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' || true
+            }
+
+            repo_in_csv() {
+              local list="$1"
+              [ -z "$list" ] && return 1
+              csv_lines "$list" | grep -Fxq "$FORK_REPO" && return 0
+              csv_lines "$list" | grep -Fxq "$FORK_OWNER/$FORK_REPO"
+            }
+
+            branch_matches_pattern() {
+              local branch="$1" patterns="$2" pattern
+              [ -z "$patterns" ] && return 1
+              while IFS= read -r pattern; do
+                [ -z "$pattern" ] && continue
+                case "$branch" in
+                  $pattern) return 0 ;;
+                esac
+              done < <(csv_lines "$patterns")
+              return 1
+            }
+
+            branch_limit_override_for_repo() {
+              local overrides="$1" item key val repo_full="$FORK_OWNER/$FORK_REPO"
+              [ -z "$overrides" ] && return 1
+              while IFS= read -r item; do
+                [ -z "$item" ] && continue
+                case "$item" in
+                  *=*) ;;
+                  *) continue ;;
+                esac
+                key=${item%%=*}
+                val=${item#*=}
+                key=$(printf '%s' "$key" | sed 's/^ *//;s/ *$//')
+                val=$(printf '%s' "$val" | sed 's/^ *//;s/ *$//')
+                if { [ "$key" = "$FORK_REPO" ] || [ "$key" = "$repo_full" ]; } && \
+                   printf '%s' "$val" | grep -Eq '^(0|[1-9][0-9]*)$'; then
+                  printf '%s\n' "$val"
+                  return 0
+                fi
+              done < <(csv_lines "$overrides")
+              return 1
+            }
 
             first_json_line() {
               awk 'match($0, /^\{.*\}/) {print substr($0, RSTART, RLENGTH); exit}' <<<"$1"
@@ -971,6 +1072,74 @@ jobs:
               return 0
             fi
 
+            local TOTAL_BRANCH_COUNT EFFECTIVE_BRANCH_LIMIT BRANCH_LIMIT_SOURCE FULL_BRANCH_SYNC
+            local OVERRIDE_LIMIT SELECTED_BRANCH_LIST SELECTED_COUNT SKIPPED_BY_PATTERN SKIPPED_BY_LIMIT
+            TOTAL_BRANCH_COUNT=$(printf '%s\n' "$UPSTREAM_BRANCH_LIST" | grep -c . || true)
+            EFFECTIVE_BRANCH_LIMIT="$MAX_BRANCHES_PER_FORK"
+            BRANCH_LIMIT_SOURCE="default"
+            FULL_BRANCH_SYNC=false
+
+            if repo_in_csv "$FULL_BRANCH_SYNC_REPOS"; then
+              FULL_BRANCH_SYNC=true
+              EFFECTIVE_BRANCH_LIMIT=0
+              BRANCH_LIMIT_SOURCE="full_branch_sync_repos"
+            else
+              OVERRIDE_LIMIT=$(branch_limit_override_for_repo "$BRANCH_LIMIT_OVERRIDES" || true)
+              if [ -n "$OVERRIDE_LIMIT" ]; then
+                EFFECTIVE_BRANCH_LIMIT="$OVERRIDE_LIMIT"
+                BRANCH_LIMIT_SOURCE="branch_limit_overrides"
+              elif repo_in_csv "$BRANCH_LIMIT_8_REPOS"; then
+                EFFECTIVE_BRANCH_LIMIT=8
+                BRANCH_LIMIT_SOURCE="branch_limit_8_repos"
+              elif repo_in_csv "$BRANCH_LIMIT_7_REPOS"; then
+                EFFECTIVE_BRANCH_LIMIT=7
+                BRANCH_LIMIT_SOURCE="branch_limit_7_repos"
+              elif repo_in_csv "$BRANCH_LIMIT_6_REPOS"; then
+                EFFECTIVE_BRANCH_LIMIT=6
+                BRANCH_LIMIT_SOURCE="branch_limit_6_repos"
+              fi
+            fi
+
+            SELECTED_BRANCH_LIST=""
+            SELECTED_COUNT=0
+            SKIPPED_BY_PATTERN=0
+            SKIPPED_BY_LIMIT=0
+            while IFS= read -r branch; do
+              [ -z "$branch" ] && continue
+              if [ "$FULL_BRANCH_SYNC" != "true" ] && [ "$branch" != "$UPSTREAM_DEFAULT" ] && \
+                 branch_matches_pattern "$branch" "$SKIP_BRANCH_PATTERNS"; then
+                SKIPPED_BY_PATTERN=$((SKIPPED_BY_PATTERN + 1))
+                continue
+              fi
+              if [ "$FULL_BRANCH_SYNC" != "true" ] && [ "$EFFECTIVE_BRANCH_LIMIT" -gt 0 ] && \
+                 [ "$SELECTED_COUNT" -ge "$EFFECTIVE_BRANCH_LIMIT" ]; then
+                SKIPPED_BY_LIMIT=$((SKIPPED_BY_LIMIT + 1))
+                continue
+              fi
+              SELECTED_BRANCH_LIST="${SELECTED_BRANCH_LIST}${branch}"$'\n'
+              SELECTED_COUNT=$((SELECTED_COUNT + 1))
+            done <<< "$UPSTREAM_BRANCH_LIST"
+
+            UPSTREAM_BRANCH_LIST=$(printf '%s' "$SELECTED_BRANCH_LIST")
+            if [ -z "$UPSTREAM_BRANCH_LIST" ]; then
+              echo "    ❌ upstream 分支筛选后为空"
+              record_failure "__branches__" "upstream 分支筛选后为空" "branches" "$UPSTREAM_BRANCH_API" "" "auto"
+              write_fork_summary "fail"
+              return 0
+            fi
+
+            echo "🌿 分支计划: upstream=$TOTAL_BRANCH_COUNT, selected=$SELECTED_COUNT, limit=$EFFECTIVE_BRANCH_LIMIT, source=$BRANCH_LIMIT_SOURCE, pattern_skip=$SKIPPED_BY_PATTERN, limit_skip=$SKIPPED_BY_LIMIT"
+            if [ "$SKIPPED_BY_LIMIT" -gt 0 ]; then
+              echo "  ⏭️  $SKIPPED_BY_LIMIT 个 upstream 分支因超过上限暂不处理"
+            fi
+            if [ "$SKIPPED_BY_PATTERN" -gt 0 ]; then
+              echo "  ⏭️  $SKIPPED_BY_PATTERN 个 upstream 分支匹配 skip_branch_patterns 暂不处理"
+            fi
+            log_event "$FORK_REPO" "branch_plan" "ok" \
+              total_branches="$TOTAL_BRANCH_COUNT" selected_branches="$SELECTED_COUNT" \
+              branch_limit="$EFFECTIVE_BRANCH_LIMIT" branch_limit_source="$BRANCH_LIMIT_SOURCE" \
+              skipped_by_pattern="$SKIPPED_BY_PATTERN" skipped_by_limit="$SKIPPED_BY_LIMIT"
+
             while IFS= read -r branch; do
               [ -z "$branch" ] && continue
               echo "  ━━━ $branch ━━━"
@@ -1255,6 +1424,8 @@ jobs:
           }
           export -f process_fork
           export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST DISCARD_LOCAL_CHANGES
+          export MAX_BRANCHES_PER_FORK SKIP_BRANCH_PATTERNS FULL_BRANCH_SYNC_REPOS BRANCH_LIMIT_6_REPOS BRANCH_LIMIT_7_REPOS
+          export BRANCH_LIMIT_8_REPOS BRANCH_LIMIT_OVERRIDES
 
           # API 限流检查:剩余配额 = 0 时睡到 reset
           # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
@@ -1310,7 +1481,7 @@ jobs:
 
             # 生成 CSV 报告 (Item 12)
             # 预定义所有 log_event 调用的 k=v 字段,缺则空
-            CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch"
+            CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch total_branches selected_branches branch_limit branch_limit_source skipped_by_pattern skipped_by_limit"
             # header
             echo "$CSV_KEYS" | tr ' ' '\n' | jq -R '.' | jq -rs '@csv' > "$RUNNER_TEMP/events.csv"
             # body

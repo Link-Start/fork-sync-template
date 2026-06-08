@@ -25,6 +25,28 @@ size_check_exempt: ""
 # 4 推荐值(够快又不触发限流),8 激进,1 串行
 max_parallel: 4
 
+# 每个 fork 默认最多同步 upstream 分支数
+# 6 = 默认分支优先 + 前 5 个其他 upstream 分支;0 = 不限制
+max_branches_per_fork: 6
+
+# 默认跳过的 upstream 分支 glob,逗号分隔
+# 默认分支永远优先处理,不受这里影响
+skip_branch_patterns: "backup/*,local-backup/*,sync-upstream/*,dependabot/*"
+
+# 指定 fork 同步全部 upstream 分支,逗号分隔;支持 repo 或 owner/repo
+# 示例: "repo-a,Link-Start/repo-b"
+full_branch_sync_repos: ""
+
+# 指定 fork 最多同步 6/7/8 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo
+# 优先级低于 full_branch_sync_repos 和 branch_limit_overrides
+branch_limit_6_repos: ""
+branch_limit_7_repos: ""
+branch_limit_8_repos: ""
+
+# 任意 N 口子,格式 repo=12,owner/repo=20;值为 0 表示该 repo 不限制
+# 优先级: full_branch_sync_repos > branch_limit_overrides > 8/7/6 列表 > max_branches_per_fork
+branch_limit_overrides: ""
+
 # 同步模式
 # auto = 自动同步 (behind 走 merge-upstream,分歧按 discard_local_changes 处理)
 # pr   = 落后时开 PR 让人审 (只对 behind 状态有效)

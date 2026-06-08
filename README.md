@@ -159,6 +159,34 @@ fork-sync-template/
 
 ---
 
+## 🌿 分支数量保护
+
+默认每个 fork 只同步 upstream 的前 6 个分支,避免某些上游几百个分支导致 API 调用暴涨或限流。upstream 默认分支会被放到第一位,一定优先处理;超出上限的其他分支本次暂不处理,不是失败。
+
+默认还会跳过这些自动生成/备份类 upstream 分支:`backup/*,local-backup/*,sync-upstream/*,dependabot/*`。默认分支不受跳过规则影响;放进 `full_branch_sync_repos` 的仓库也不受跳过规则影响。
+
+长期配置写到 `.github/sync-config.yml`,手动测试也可以在 workflow input 里临时填同名字段:
+
+```yaml
+max_branches_per_fork: 6
+skip_branch_patterns: "backup/*,local-backup/*,sync-upstream/*,dependabot/*"
+
+# 指定仓库同步全部分支
+full_branch_sync_repos: "repo-a,Link-Start/repo-b"
+
+# 指定仓库同步 6/7/8 个分支
+branch_limit_6_repos: "repo-c"
+branch_limit_7_repos: "repo-d"
+branch_limit_8_repos: "repo-e"
+
+# 任意 N 口子;0 表示该仓库不限制
+branch_limit_overrides: "repo-f=12,Link-Start/repo-g=20,repo-h=0"
+```
+
+优先级:`full_branch_sync_repos` > `branch_limit_overrides` > `branch_limit_8_repos` > `branch_limit_7_repos` > `branch_limit_6_repos` > `max_branches_per_fork`。
+
+---
+
 ## 🛑 上游删源码防护 (体积暴减检测)
 
 **最危险的场景:upstream 删了所有源码只留一个 README/说明文件,旧版会乖乖同步把 fork 源码也删光。**
