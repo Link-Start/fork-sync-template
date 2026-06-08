@@ -79,16 +79,8 @@ on:
         description: '这些 fork 同步全部 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
         required: false
         default: ''
-      branch_limit_6_repos:
-        description: '这些 fork 最多同步 6 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
-        required: false
-        default: ''
-      branch_limit_7_repos:
-        description: '这些 fork 最多同步 7 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
-        required: false
-        default: ''
-      branch_limit_8_repos:
-        description: '这些 fork 最多同步 8 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo'
+      branch_limit_groups:
+        description: '按分支数分组指定 fork,格式 3:repo-a,repo-b;10:owner/repo-c;0:repo-d'
         required: false
         default: ''
       branch_limit_overrides:
@@ -160,9 +152,8 @@ jobs:
       DEFAULT_SKIP_BRANCH_PATTERNS: 'backup/*,local-backup/*,sync-upstream/*,dependabot/*'
       # 特定 fork 分支上限口子 (逗号分隔,支持 repo 或 owner/repo)
       DEFAULT_FULL_BRANCH_SYNC_REPOS: ''
-      DEFAULT_BRANCH_LIMIT_6_REPOS: ''
-      DEFAULT_BRANCH_LIMIT_7_REPOS: ''
-      DEFAULT_BRANCH_LIMIT_8_REPOS: ''
+      # 任意分组口子: 3:repo-a,repo-b;10:owner/repo-c;0:repo-d
+      DEFAULT_BRANCH_LIMIT_GROUPS: ''
       # 任意 N 口子: repo=12,owner/repo=20;值为 0 表示该 repo 不限制
       DEFAULT_BRANCH_LIMIT_OVERRIDES: ''
       # 通用模板默认不豁免 size 检查,让 forker 手动触发时填
@@ -329,8 +320,8 @@ jobs:
           echo "📄 找到 .github/sync-config.yml,加载覆盖:"
           for KEY in exclude_pattern exclude_repos size_drop_threshold size_check_exempt \
                      max_parallel max_branches_per_fork skip_branch_patterns full_branch_sync_repos \
-                     branch_limit_6_repos branch_limit_7_repos branch_limit_8_repos \
-                     branch_limit_overrides sync_mode webhook_type discard_local_changes; do
+                     branch_limit_groups branch_limit_overrides sync_mode webhook_type \
+                     discard_local_changes; do
             VAL=$(echo "$CONFIG_YAML" | grep -E "^${KEY}:" | head -1 \
                   | sed -E "s/^${KEY}:[[:space:]]*//" \
                   | sed 's/^["'"'"']//;s/["'"'"']$//' || echo "")
@@ -528,9 +519,7 @@ jobs:
           MAX_BRANCHES_PER_FORK: ${{ inputs.max_branches_per_fork || env.CONFIG_MAX_BRANCHES_PER_FORK || env.DEFAULT_MAX_BRANCHES_PER_FORK }}
           SKIP_BRANCH_PATTERNS: ${{ inputs.skip_branch_patterns || env.CONFIG_SKIP_BRANCH_PATTERNS || env.DEFAULT_SKIP_BRANCH_PATTERNS }}
           FULL_BRANCH_SYNC_REPOS: ${{ inputs.full_branch_sync_repos || env.CONFIG_FULL_BRANCH_SYNC_REPOS || env.DEFAULT_FULL_BRANCH_SYNC_REPOS }}
-          BRANCH_LIMIT_6_REPOS: ${{ inputs.branch_limit_6_repos || env.CONFIG_BRANCH_LIMIT_6_REPOS || env.DEFAULT_BRANCH_LIMIT_6_REPOS }}
-          BRANCH_LIMIT_7_REPOS: ${{ inputs.branch_limit_7_repos || env.CONFIG_BRANCH_LIMIT_7_REPOS || env.DEFAULT_BRANCH_LIMIT_7_REPOS }}
-          BRANCH_LIMIT_8_REPOS: ${{ inputs.branch_limit_8_repos || env.CONFIG_BRANCH_LIMIT_8_REPOS || env.DEFAULT_BRANCH_LIMIT_8_REPOS }}
+          BRANCH_LIMIT_GROUPS: ${{ inputs.branch_limit_groups || env.CONFIG_BRANCH_LIMIT_GROUPS || env.DEFAULT_BRANCH_LIMIT_GROUPS }}
           BRANCH_LIMIT_OVERRIDES: ${{ inputs.branch_limit_overrides || env.CONFIG_BRANCH_LIMIT_OVERRIDES || env.DEFAULT_BRANCH_LIMIT_OVERRIDES }}
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
@@ -663,6 +652,30 @@ jobs:
                 fi
               done < <(csv_lines "$overrides")
               return 1
+            }
+
+            branch_limit_group_for_repo() {
+              local groups="$1" group limit repos repo_full="$FORK_OWNER/$FORK_REPO"
+              [ -z "$groups" ] && return 1
+              printf '%s' "$groups" | tr ';' '\n' | while IFS= read -r group; do
+                group=$(printf '%s' "$group" | sed 's/^ *//;s/ *$//')
+                [ -z "$group" ] && continue
+                case "$group" in
+                  *:*) ;;
+                  *) continue ;;
+                esac
+                limit=${group%%:*}
+                repos=${group#*:}
+                limit=$(printf '%s' "$limit" | sed 's/^ *//;s/ *$//')
+                if ! printf '%s' "$limit" | grep -Eq '^(0|[1-9][0-9]*)$'; then
+                  continue
+                fi
+                if csv_lines "$repos" | grep -Fxq "$FORK_REPO" || \
+                   csv_lines "$repos" | grep -Fxq "$repo_full"; then
+                  printf '%s\n' "$limit"
+                  exit 0
+                fi
+              done
             }
 
             first_json_line() {
@@ -1088,15 +1101,12 @@ jobs:
               if [ -n "$OVERRIDE_LIMIT" ]; then
                 EFFECTIVE_BRANCH_LIMIT="$OVERRIDE_LIMIT"
                 BRANCH_LIMIT_SOURCE="branch_limit_overrides"
-              elif repo_in_csv "$BRANCH_LIMIT_8_REPOS"; then
-                EFFECTIVE_BRANCH_LIMIT=8
-                BRANCH_LIMIT_SOURCE="branch_limit_8_repos"
-              elif repo_in_csv "$BRANCH_LIMIT_7_REPOS"; then
-                EFFECTIVE_BRANCH_LIMIT=7
-                BRANCH_LIMIT_SOURCE="branch_limit_7_repos"
-              elif repo_in_csv "$BRANCH_LIMIT_6_REPOS"; then
-                EFFECTIVE_BRANCH_LIMIT=6
-                BRANCH_LIMIT_SOURCE="branch_limit_6_repos"
+              else
+                OVERRIDE_LIMIT=$(branch_limit_group_for_repo "$BRANCH_LIMIT_GROUPS" || true)
+                if [ -n "$OVERRIDE_LIMIT" ]; then
+                  EFFECTIVE_BRANCH_LIMIT="$OVERRIDE_LIMIT"
+                  BRANCH_LIMIT_SOURCE="branch_limit_groups"
+                fi
               fi
             fi
 
@@ -1424,8 +1434,7 @@ jobs:
           }
           export -f process_fork
           export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST DISCARD_LOCAL_CHANGES
-          export MAX_BRANCHES_PER_FORK SKIP_BRANCH_PATTERNS FULL_BRANCH_SYNC_REPOS BRANCH_LIMIT_6_REPOS BRANCH_LIMIT_7_REPOS
-          export BRANCH_LIMIT_8_REPOS BRANCH_LIMIT_OVERRIDES
+          export MAX_BRANCHES_PER_FORK SKIP_BRANCH_PATTERNS FULL_BRANCH_SYNC_REPOS BRANCH_LIMIT_GROUPS BRANCH_LIMIT_OVERRIDES
 
           # API 限流检查:剩余配额 = 0 时睡到 reset
           # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查

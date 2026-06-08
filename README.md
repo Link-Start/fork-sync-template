@@ -174,16 +174,17 @@ skip_branch_patterns: "backup/*,local-backup/*,sync-upstream/*,dependabot/*"
 # 指定仓库同步全部分支
 full_branch_sync_repos: "repo-a,Link-Start/repo-b"
 
-# 指定仓库同步 6/7/8 个分支
-branch_limit_6_repos: "repo-c"
-branch_limit_7_repos: "repo-d"
-branch_limit_8_repos: "repo-e"
+# 按分支数分组指定 fork,支持任意数量规格
+# 例子: repo-c/repo-d 同步 3 个分支,repo-e/repo-f 同步 4 个分支,repo-g 同步 100 个分支
+branch_limit_groups: "3:repo-c,repo-d;4:repo-e,repo-f;100:repo-g"
 
-# 任意 N 口子;0 表示该仓库不限制
-branch_limit_overrides: "repo-f=12,Link-Start/repo-g=20,repo-h=0"
+# 单仓库精确覆盖;0 表示该仓库不限制
+branch_limit_overrides: "repo-h=12,Link-Start/repo-i=20,repo-j=0"
 ```
 
-优先级:`full_branch_sync_repos` > `branch_limit_overrides` > `branch_limit_8_repos` > `branch_limit_7_repos` > `branch_limit_6_repos` > `max_branches_per_fork`。
+`branch_limit_groups` 的格式是 `分支数:仓库1,仓库2;分支数:仓库3,仓库4`。分支数支持任意非负整数,不需要新增字段;`0` 表示不限制,同步全部 upstream 分支。
+
+优先级:`full_branch_sync_repos` > `branch_limit_overrides` > `branch_limit_groups` > `max_branches_per_fork`。
 
 ---
 

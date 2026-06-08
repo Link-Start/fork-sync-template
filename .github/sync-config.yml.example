@@ -37,14 +37,14 @@ skip_branch_patterns: "backup/*,local-backup/*,sync-upstream/*,dependabot/*"
 # 示例: "repo-a,Link-Start/repo-b"
 full_branch_sync_repos: ""
 
-# 指定 fork 最多同步 6/7/8 个 upstream 分支,逗号分隔;支持 repo 或 owner/repo
-# 优先级低于 full_branch_sync_repos 和 branch_limit_overrides
-branch_limit_6_repos: ""
-branch_limit_7_repos: ""
-branch_limit_8_repos: ""
+# 按分支数分组指定 fork,支持任意数量规格;支持 repo 或 owner/repo
+# 格式: 分支数:仓库1,仓库2;分支数:仓库3,仓库4
+# 示例: "3:fork1,fork2;4:fork3,Link-Start/fork4;100:fork5;0:fork6"
+# 0 表示该组仓库不限制,同步全部 upstream 分支
+branch_limit_groups: ""
 
 # 任意 N 口子,格式 repo=12,owner/repo=20;值为 0 表示该 repo 不限制
-# 优先级: full_branch_sync_repos > branch_limit_overrides > 8/7/6 列表 > max_branches_per_fork
+# 优先级: full_branch_sync_repos > branch_limit_overrides > branch_limit_groups > max_branches_per_fork
 branch_limit_overrides: ""
 
 # 同步模式
