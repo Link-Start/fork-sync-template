@@ -97,6 +97,7 @@ only_repo_candidates() {
 }
 
 FORKS="[]"
+DISCOVERED_COUNT=0
 if [ -n "$ONLY_REPOS" ]; then
   echo "🎯 only_repos 快速模式: 只查询指定 fork,不扫描全量账号 → $ONLY_REPOS"
   CANDIDATES=$(only_repo_candidates)
@@ -119,6 +120,8 @@ else
   done
 fi
 
+DISCOVERED_COUNT=$(echo "$FORKS" | jq length)
+
 if [ -n "$FILTER" ]; then
   FORKS=$(echo "$FORKS" | jq --arg f "$FILTER" '[.[] | select(.parent_owner == $f)]')
   echo "🔍 正向过滤: 只保留 parent_owner == $FILTER"
@@ -139,7 +142,7 @@ if [ -n "$EXCLUDE_REPOS" ]; then
 fi
 
 COUNT=$(echo "$FORKS" | jq length)
-if [ -n "$ONLY_REPOS" ] && [ "$COUNT" -eq 0 ]; then
+if [ -n "$ONLY_REPOS" ] && [ "$COUNT" -eq 0 ] && [ "$DISCOVERED_COUNT" -eq 0 ]; then
   echo "::error::only_repos 没匹配到任何 fork: $ONLY_REPOS"
   echo "  提示:填 fork 仓库名,例如 lanhu-mcp_dsphper; 多 owner 时也可填 Link-Start/lanhu-mcp_dsphper"
   exit 1
@@ -150,7 +153,11 @@ echo "$FORKS" >> "$GITHUB_OUTPUT"
 echo "EOF" >> "$GITHUB_OUTPUT"
 
 if [ "$COUNT" -eq 0 ]; then
-  echo "⚠️ 没找到任何符合条件的 fork"
+  if [ -n "$ONLY_REPOS" ] && [ "$DISCOVERED_COUNT" -gt 0 ]; then
+    echo "⏭️  only_repos 匹配到 $DISCOVERED_COUNT 个 fork,但已被过滤/排除条件跳过: $ONLY_REPOS"
+  else
+    echo "⚠️ 没找到任何符合条件的 fork"
+  fi
   exit 0
 fi
 
