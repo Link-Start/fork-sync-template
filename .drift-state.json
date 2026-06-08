@@ -1,11 +1,11 @@
 {
   "forks": {
-    "codux_duxweb": {
+    "douyin_erma0": {
       "last_result": "complete",
-      "last_ts": "2026-06-08T12:04:29.938Z",
+      "last_ts": "2026-06-08T12:15:44.094Z",
       "consecutive_failures": 0,
-      "last_alert_ts": "2026-06-08T09:35:44Z"
+      "last_alert_ts": null
     }
   },
-  "updated_at": "2026-06-08T12:04:30Z"
+  "updated_at": "2026-06-08T12:15:44Z"
 }
