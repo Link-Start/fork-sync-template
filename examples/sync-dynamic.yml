@@ -823,7 +823,7 @@ jobs:
             # ----- 阶段 1.5: 危险检测 - 上游体积暴减 -----
             # 场景: 上游把源码删了只留 README/说明文件,同步会把 fork 源码也删光
             # 启发: GitHub repo .size 字段 (KB),当 fork 已有实质内容 (>= 50KB)
-            #       且 upstream 体积/fork 体积 < SIZE_DROP_THRESHOLD 时,跳过整个 fork
+            #       且 upstream 为空或 upstream 体积/fork 体积 < SIZE_DROP_THRESHOLD 时,跳过整个 fork
             # SIZE_DROP_THRESHOLD 默认 0.10 (=10%,敏感);0.30 宽松;0 关闭
             # SIZE_CHECK_EXEMPT: 逗号分隔的 fork 名白名单,这些 fork 跳过 size 检查
             #                    适用于极小项目 (1KB CLI 工具) 被误杀的情况
@@ -838,6 +838,15 @@ jobs:
             FORK_SIZE=$(gh_api_with_retry "repos/$FORK_OWNER/$FORK_REPO" --jq '.size // 0' 2>/dev/null || echo 0)
             UPSTREAM_SIZE=$(gh_api_with_retry "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO" --jq '.size // 0' 2>/dev/null || echo 0)
             THRESHOLD_PCT=$(awk "BEGIN {printf \"%.0f\", $SIZE_DROP_THRESHOLD * 100}")
+            if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && \
+               [ "$(awk "BEGIN {print ($SIZE_DROP_THRESHOLD > 0 && $UPSTREAM_SIZE <= 0) ? 1 : 0}")" = "1" ]; then
+              echo "::error::🛑 危险: 上游仓库为空或源码不可用 (fork=${FORK_SIZE}KB → upstream=${UPSTREAM_SIZE}KB,阈值 ${THRESHOLD_PCT}%)"
+              echo "  疑似上游删库/清空源码/只保留空历史,跳过本次同步"
+              log_event "$FORK_REPO" "size_check" "skip" reason="上游仓库为空或源码不可用" fork_kb="$FORK_SIZE" upstream_kb="$UPSTREAM_SIZE" ratio_pct="0.0" threshold_pct="$THRESHOLD_PCT"
+              SKIPPED+=("$FORK_REPO")
+              write_fork_summary "skip" "上游仓库为空或源码不可用"
+              return 0
+            fi
             if [ "$SKIP_SIZE_CHECK" != "true" ] && [ "${FORK_SIZE:-0}" -ge 50 ] && [ "${UPSTREAM_SIZE:-0}" -gt 0 ] && \
                [ "$(awk "BEGIN {print ($UPSTREAM_SIZE < $FORK_SIZE * $SIZE_DROP_THRESHOLD) ? 1 : 0}")" = "1" ]; then
               local RATIO

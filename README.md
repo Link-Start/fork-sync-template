@@ -168,6 +168,7 @@ fork-sync-template/
 | 条件 | 行为 |
 |---|---|
 | fork < 50KB | 跳过检测 (避免误杀小项目) |
+| upstream 体积 = 0KB 且阈值 > 0 | **跳过整个 fork**,标注上游仓库为空或源码不可用 |
 | upstream 体积 < fork × `size_drop_threshold` | **跳过整个 fork**,打 `::error::` 红色警报 |
 | upstream 体积 ≥ fork × `size_drop_threshold` | 通过,正常 sync |
 
