@@ -1,0 +1,4 @@
+# Fork Sync runtime configuration.
+# Keep old historical forks here when they should never be auto-synced.
+
+exclude_repos: "gpt2api_432539"
