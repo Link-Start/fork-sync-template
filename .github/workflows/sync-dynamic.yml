@@ -987,15 +987,27 @@ jobs:
 
             # GitHub branches API is paginated. Process the default branch first so
             # a large upstream cannot starve main behind later pages.
-            UPSTREAM_BRANCH_LIST=$(printf '%s\n' "$UPSTREAM_BRANCH_LIST" | awk -v default="$UPSTREAM_DEFAULT" '
+            SORTED_BRANCH_LIST=$(printf '%s\n' "$UPSTREAM_BRANCH_LIST" | awk -v default_branch="$UPSTREAM_DEFAULT" '
               $0 == "" { next }
-              $0 == default { has_default = 1; next }
+              $0 == default_branch { has_default = 1; next }
               !seen[$0]++ { branches[++n] = $0 }
               END {
-                if (default != "" && has_default) print default
+                if (default_branch != "" && has_default) print default_branch
                 for (i = 1; i <= n; i++) print branches[i]
               }
-            ')
+            ') || {
+              echo "    ❌ upstream 分支排序失败"
+              record_failure "__branches__" "upstream 分支排序失败" "branches" "$UPSTREAM_BRANCH_API" "" "auto"
+              write_fork_summary "fail"
+              return 0
+            }
+            UPSTREAM_BRANCH_LIST="$SORTED_BRANCH_LIST"
+            if [ -z "$UPSTREAM_BRANCH_LIST" ]; then
+              echo "    ❌ upstream 分支排序后为空"
+              record_failure "__branches__" "upstream 分支排序后为空" "branches" "$UPSTREAM_BRANCH_API" "" "auto"
+              write_fork_summary "fail"
+              return 0
+            fi
 
             while IFS= read -r branch; do
               [ -z "$branch" ] && continue
