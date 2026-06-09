@@ -450,6 +450,12 @@ process_fork() {
 
     backup_branch="local-backup/${source_branch}-$(date +%Y%m%d-%H%M%S)-${fork_sha:0:7}"
     backup_api="repos/$FORK_OWNER/$FORK_REPO/git/refs"
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      echo "    [DRY-RUN] 会保护备份: $backup_branch → ${fork_sha:0:7}"
+      LOCAL_BACKED_UP+=("$source_branch:$backup_branch")
+      log_event "$FORK_REPO" "local_backup" "dry_run" branch="$source_branch" backup_branch="$backup_branch" reason="$reason" sha="${fork_sha:0:7}"
+      return 0
+    fi
     if gh_api_write_capture backup_out backup_err -X POST "$backup_api" \
          -f ref="refs/heads/$backup_branch" \
          -f sha="$fork_sha" >/dev/null 2>&1; then
