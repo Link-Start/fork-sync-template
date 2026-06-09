@@ -218,6 +218,28 @@ branch_limit_overrides: "repo-h=12,Link-Start/repo-i=20,repo-j=0"
 
 保护备份复用规则:如果没有标准 `local-backup/*` 备份就创建;如果已有备份分支包含当前 fork 默认分支 HEAD,说明当前 fork 的所有提交已经被备份,直接跳过新备份;如果已有备份不包含当前 HEAD,说明 fork 后续又有新提交,会再次创建保护备份。
 
+### 两个异常 fork 列表
+
+对 fork 源库异常、迁移、私有化或删库的情况,不要混进 `exclude_repos`;用两个语义明确的列表:
+
+| 配置 | 行为 |
+|---|---|
+| `protected_skip_repos` | 只创建/复用 fork 内 `local-backup/*` 保护备份,然后跳过;不集中备份,不 Discard |
+| `backup_then_sync_repos` | 先备份到 `legacy_backup_repo`,校验备份包含当前 fork HEAD 后,允许原 fork 执行 Discard/同步当前指向库 |
+
+示例:
+
+```yaml
+protected_skip_repos: "gpt2api_432539"
+backup_then_sync_repos: ""
+legacy_backup_repo: "Link-Start/fork-legacy-backups"
+legacy_backup_branch_prefix: "legacy"
+```
+
+如果同一个仓库同时出现在两个列表里,workflow 会报配置冲突并跳过该 fork,避免误操作。
+
+当前集中备份只覆盖 fork 默认分支,所以 `backup_then_sync_repos` 只会释放默认分支去对齐当前指向库;其他分支继续按普通同步规则处理。
+
 **`size_drop_threshold` 可调** (默认 `0.10` = 10%):
 - `0.10` (默认) — 敏感,推荐大多数人
 - `0.30` — 宽松,大重构可能误判

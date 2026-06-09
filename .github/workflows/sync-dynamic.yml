@@ -183,6 +183,14 @@ jobs:
       # keep  = 去重备份本地修改后,使用 merge-upstream 合并上游更新
       # 纯 ahead 且 upstream 无新增时跳过,不备份也不写分支
       DEFAULT_DISCARD_LOCAL_CHANGES: 'force'
+      # 保护跳过列表: 只做 local-backup 保护备份,不进入同步/Discard。
+      DEFAULT_PROTECTED_SKIP_REPOS: ''
+      # 集中备份后同步列表: 先备份到统一仓库,再允许原 fork 对齐当前指向库。
+      DEFAULT_BACKUP_THEN_SYNC_REPOS: ''
+      # 集中备份仓库,例如 Link-Start/fork-legacy-backups;留空则禁用列表 2。
+      DEFAULT_LEGACY_BACKUP_REPO: ''
+      # 集中备份分支前缀。
+      DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX: 'legacy'
     steps:
       - name: Checkout config repository
         uses: actions/checkout@v4
@@ -194,7 +202,9 @@ jobs:
       #            size_check_exempt / max_parallel / max_branches_per_fork /
       #            skip_branch_patterns / full_branch_sync_repos /
       #            branch_limit_groups / branch_limit_overrides /
-      #            sync_mode / webhook_type / discard_local_changes
+      #            sync_mode / webhook_type / discard_local_changes /
+      #            protected_skip_repos / backup_then_sync_repos /
+      #            legacy_backup_repo / legacy_backup_branch_prefix
       # 格式: 简单的 key: value (不支持嵌套 YAML,值用引号包起来)
       # =====================================================================
       - name: Read sync config
@@ -239,6 +249,10 @@ jobs:
           FULL_BRANCH_SYNC_REPOS: ${{ inputs.full_branch_sync_repos || env.CONFIG_FULL_BRANCH_SYNC_REPOS || env.DEFAULT_FULL_BRANCH_SYNC_REPOS }}
           BRANCH_LIMIT_GROUPS: ${{ inputs.branch_limit_groups || env.CONFIG_BRANCH_LIMIT_GROUPS || env.DEFAULT_BRANCH_LIMIT_GROUPS }}
           BRANCH_LIMIT_OVERRIDES: ${{ inputs.branch_limit_overrides || env.CONFIG_BRANCH_LIMIT_OVERRIDES || env.DEFAULT_BRANCH_LIMIT_OVERRIDES }}
+          PROTECTED_SKIP_REPOS: ${{ env.CONFIG_PROTECTED_SKIP_REPOS || env.DEFAULT_PROTECTED_SKIP_REPOS }}
+          BACKUP_THEN_SYNC_REPOS: ${{ env.CONFIG_BACKUP_THEN_SYNC_REPOS || env.DEFAULT_BACKUP_THEN_SYNC_REPOS }}
+          LEGACY_BACKUP_REPO: ${{ env.CONFIG_LEGACY_BACKUP_REPO || env.DEFAULT_LEGACY_BACKUP_REPO }}
+          LEGACY_BACKUP_BRANCH_PREFIX: ${{ env.CONFIG_LEGACY_BACKUP_BRANCH_PREFIX || env.DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX }}
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
           CONFIG_REPO: ${{ github.event.repository.name }}

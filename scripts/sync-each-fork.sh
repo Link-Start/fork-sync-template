@@ -66,6 +66,7 @@ source "$SCRIPT_DIR/fork-worker.sh"
 export -f process_fork
 export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST DISCARD_LOCAL_CHANGES
 export MAX_BRANCHES_PER_FORK SKIP_BRANCH_PATTERNS FULL_BRANCH_SYNC_REPOS BRANCH_LIMIT_GROUPS BRANCH_LIMIT_OVERRIDES
+export PROTECTED_SKIP_REPOS BACKUP_THEN_SYNC_REPOS LEGACY_BACKUP_REPO LEGACY_BACKUP_BRANCH_PREFIX DRY_RUN
 
 # API 限流检查:剩余配额 = 0 时睡到 reset
 # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
@@ -121,7 +122,7 @@ if [ -f "$RUNNER_TEMP/events.jsonl" ] && [ -s "$RUNNER_TEMP/events.jsonl" ]; the
 
   # 生成 CSV 报告 (Item 12)
   # 预定义所有 log_event 调用的 k=v 字段,缺则空
-  CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch total_branches selected_branches branch_limit branch_limit_source skipped_by_pattern skipped_by_limit"
+  CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch legacy_backup_repo legacy_backup_branch total_branches selected_branches branch_limit branch_limit_source skipped_by_pattern skipped_by_limit"
   # header
   echo "$CSV_KEYS" | tr ' ' '\n' | jq -R '.' | jq -rs '@csv' > "$RUNNER_TEMP/events.csv"
   # body
@@ -167,4 +168,3 @@ if [ "$TOTAL_FAILED" -gt 0 ]; then
   echo "::error::本次同步存在 $TOTAL_FAILED 个分支失败"
   exit 1
 fi
-
