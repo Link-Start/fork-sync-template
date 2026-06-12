@@ -142,6 +142,14 @@ on:
         options:
           - 'true'
           - 'false'
+      backup_only:
+        description: '只做独立仓库全分支备份,跳过同步/Discard'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 # 显式声明需要写权限
 permissions:
@@ -159,7 +167,7 @@ jobs:
       # 日常使用配置: 排除 claude 相关 fork
       # 想排除别的关键词改这里 (大小写不敏感,匹配 fork 名称)
       # 留空 = 不排除任何 fork
-      DEFAULT_EXCLUDE_PATTERN: 'claude'
+      DEFAULT_EXCLUDE_PATTERN: ''
       # 日常使用配置: 体积暴减告警阈值
       # 上游体积/fork 体积 < 此值时触发告警,跳过 fork
       # 0.10 = 上游只剩 fork 的 10% 触发 (推荐,敏感)
@@ -191,6 +199,8 @@ jobs:
       # keep  = 去重备份本地修改后,使用 merge-upstream 合并上游更新
       # 纯 ahead 且 upstream 无新增时跳过,不备份也不写分支
       DEFAULT_DISCARD_LOCAL_CHANGES: 'force'
+      # 只做独立仓库全分支备份,不执行同步/Discard。
+      DEFAULT_BACKUP_ONLY: 'false'
       # 保护跳过列表: 只做 local-backup 保护备份,不进入同步/Discard。
       DEFAULT_PROTECTED_SKIP_REPOS: ''
       # 集中备份后同步列表: 先备份到统一仓库,再允许原 fork 对齐当前指向库。
@@ -224,6 +234,7 @@ jobs:
       #            skip_branch_patterns / full_branch_sync_repos /
       #            branch_limit_groups / branch_limit_overrides /
       #            sync_mode / webhook_type / discard_local_changes /
+      #            backup_only /
       #            protected_skip_repos / legacy_backup_repos /
       #            backup_then_sync_repos /
       #            legacy_backup_repo / legacy_backup_branch_prefix /
@@ -285,6 +296,7 @@ jobs:
       # Step 2: 并发同步 fork (脚本化实现,避免 workflow YAML 继续膨胀)
       # =====================================================================
       - name: Sync each fork
+        if: ${{ inputs.backup_only != 'true' && env.CONFIG_BACKUP_ONLY != 'true' }}
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
           MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}

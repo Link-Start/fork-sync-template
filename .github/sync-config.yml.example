@@ -37,7 +37,7 @@ legacy_backup_branch_prefix: "legacy"
 # 需要配置 secrets.BACKUP_GH_TOKEN;如果要自动建库,token 必须属于 mirror_backup_owner。
 mirror_backup_enabled: "false"
 mirror_backup_owner: "LinkStart413"
-# 留空 = 备份所有本次发现的 fork;非空 = 只备份这些 repo 或 owner/repo
+# 留空或 "*" = 备份所有本次发现的 fork;非空 = 只备份这些 repo 或 owner/repo
 mirror_backup_repos: ""
 mirror_backup_repo_prefix: ""
 mirror_backup_repo_suffix: ""
@@ -46,6 +46,10 @@ mirror_backup_snapshot_prefix: "snapshots"
 mirror_backup_current_prefix: "current"
 mirror_backup_tag_prefix: "backup"
 mirror_backup_update_current: "true"
+
+# 只做独立仓库全分支备份,跳过后续同步/Discard。
+# 适合把本模板作为灾备调度器使用。
+backup_only: "false"
 
 # 上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,跳过 fork)
 # 0.10 = 敏感 (推荐)  0.30 = 宽松  0 = 关闭

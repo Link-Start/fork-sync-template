@@ -18,6 +18,7 @@ csv_lines() {
 repo_in_csv() {
   local list="$1" fork_owner="$2" fork_name="$3"
   [ -z "$list" ] && return 0
+  csv_lines "$list" | grep -Fxq "*" && return 0
   csv_lines "$list" | grep -Fxq "$fork_name" && return 0
   csv_lines "$list" | grep -Fxq "$fork_owner/$fork_name"
 }
