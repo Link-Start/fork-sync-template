@@ -33,6 +33,7 @@ process_fork() {
   repo_in_csv() {
     local list="$1"
     [ -z "$list" ] && return 1
+    csv_lines "$list" | grep -Fxq "*" && return 0
     csv_lines "$list" | grep -Fxq "$FORK_REPO" && return 0
     csv_lines "$list" | grep -Fxq "$FORK_OWNER/$FORK_REPO"
   }

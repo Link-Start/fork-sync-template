@@ -77,7 +77,7 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 ```
 <你的账号>/fork-sync-template/
 ├── .github/workflows/
-│   └── sync-dynamic.yml             # ✅ 默认开,作者日常使用版 (默认排除 claude 相关)
+│   └── sync-dynamic.yml             # ✅ 默认开,作者日常使用版 (可被 sync-config.yml 覆盖)
 ├── examples/
 │   ├── sync-dynamic.yml             # 通用模板: 动态发现 (fork 者可选用,免维护 fork 列表)
 │   └── sync-static.yml              # 通用模板: 静态 matrix (fork 者可选用,要手写列表)
@@ -97,7 +97,7 @@ forks=$(gh api 'user/repos?per_page=100&type=owner&sort=updated' \
 - 这两个 yml 都是**通用模板**,fork 者可能想自己改或者根本不想用
 - 静态 matrix 的 yml 里**写死了 fork 名** (模板作者的 fork),没改就跑会出 bug
 - 放 `examples/` 强制 fork 者**主动决定**要不要用,**不会一 fork 就跑出乱子**
-- 只有 `.github/workflows/sync-dynamic.yml` 是作者日常配置,fork 后直接跑就对(默认排除 claude 相关)
+- 只有 `.github/workflows/sync-dynamic.yml` 是作者日常配置,fork 后直接跑就对;长期策略建议写到 `.github/sync-config.yml`
 
 ---
 
@@ -255,7 +255,7 @@ Link-Start/
 ├── ...
 └── fork-sync-template/                 # 公共模板,给所有人用
     ├── .github/workflows/
-    │   └── sync-dynamic.yml                # 默认,作者日常使用 (排除 claude 相关)
+    │   └── sync-dynamic.yml                # 默认,作者日常使用 (可被 sync-config.yml 覆盖)
     ├── examples/
     │   ├── sync-dynamic.yml                # 通用动态模板
     │   └── sync-static.yml                 # 通用静态模板

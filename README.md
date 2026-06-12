@@ -7,7 +7,7 @@
 
 ## 这是什么
 
-一个**可直接 fork 使用的 GitHub 模板仓库**。本仓库的 `.github/workflows/sync-dynamic.yml` 是作者日常使用配置(自动排除 claude 相关库);`examples/` 下放两种风格的**通用模板**(不放在 `.github/workflows/` 里所以不会被自动跑,fork 者可按需启用)。
+一个**可直接 fork 使用的 GitHub 模板仓库**。本仓库的 `.github/workflows/sync-dynamic.yml` 是作者日常使用配置(可通过 `.github/sync-config.yml` 覆盖成灾备或同步策略);`examples/` 下放两种风格的**通用模板**(不放在 `.github/workflows/` 里所以不会被自动跑,fork 者可按需启用)。
 
 **核心特性**:
 - ✅ 纯 GitHub REST API,只 checkout 配置仓库脚本,不 checkout 目标 fork、不 git push
@@ -31,7 +31,7 @@ fork-sync-template/
 ├── .github/
 │   ├── sync-config.yml.example       # 可选本地配置示例
 │   └── workflows/
-│       ├── sync-dynamic.yml          # ✅ 作者日常使用配置 (默认排除 claude 相关 fork)
+│       ├── sync-dynamic.yml          # ✅ 作者日常使用配置 (可被 sync-config.yml 覆盖)
 │       ├── health-check.yml          # 独立健康检查
 │       ├── rollback.yml              # 手动回滚 backup tag
 │       └── cleanup-local-backups.yml # 安全清理 local-backup 备份分支
@@ -68,7 +68,7 @@ fork-sync-template/
 
 ## 怎么用
 
-### 方式 1: 直接用默认配置 (排除 claude 相关)
+### 方式 1: 直接用默认配置
 
 最简单,不用维护 fork 列表:
 
@@ -76,13 +76,13 @@ fork-sync-template/
 2. **配置跨仓库 token**: 在配置仓库 Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`,值用你自己的 PAT,至少给目标 fork 仓库 `Contents: Read and write` 权限。
 3. **开 workflow 写权限**: 进你 fork 后的仓库 → Settings → Actions → General → Workflow permissions → 选 **Read and write permissions** → Save
 4. **开定时任务**: 进 Actions 标签页 → 看到黄色提示 "Workflows aren't being run on this forked repository" → 点 **"I understand my workflows, go ahead and enable them"**
-5. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
+5. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,按 `.github/sync-config.yml` 或 workflow 默认值执行备份/同步策略。
 
-**想改排除的关键词?** 编辑 `.github/workflows/sync-dynamic.yml` 里的 `DEFAULT_EXCLUDE_PATTERN: 'claude'`,改其他词或留空。
+**想加排除关键词?** 编辑 `.github/workflows/sync-dynamic.yml` 里的 `DEFAULT_EXCLUDE_PATTERN` 或写 `.github/sync-config.yml` 的 `exclude_pattern`。
 
 ### 方式 2: 用通用动态模板 (不过滤任何 fork)
 
-如果默认的"排除 claude"不符合你的需要:
+如果你想从更干净的通用模板起步:
 
 1. **Fork 这个仓库**
 2. **用 `examples/sync-dynamic.yml` 替换默认 yml**:
@@ -218,27 +218,36 @@ branch_limit_overrides: "repo-h=12,Link-Start/repo-i=20,repo-j=0"
 
 保护备份复用规则:如果没有标准 `local-backup/*` 备份就创建;如果已有备份分支包含当前 fork 默认分支 HEAD,说明当前 fork 的所有提交已经被备份,直接跳过新备份;如果已有备份不包含当前 HEAD,说明 fork 后续又有新提交,会再次创建保护备份。
 
-### 两个异常 fork 列表
+### 异常 fork 与灾备列表
 
-对 fork 源库异常、迁移、私有化或删库的情况,不要混进 `exclude_repos`;用两个语义明确的列表:
+对 fork 源库异常、迁移、私有化或删库的情况,不要混进 `exclude_repos`;用语义明确的列表:
 
 | 配置 | 行为 |
 |---|---|
 | `protected_skip_repos` | 只创建/复用 fork 内 `local-backup/*` 保护备份,然后跳过;不集中备份,不 Discard |
+| `legacy_backup_repos` | 只把 fork 默认分支备份到统一备份仓库;支持 `*` 表示所有发现到的 fork |
 | `backup_then_sync_repos` | 先备份到 `legacy_backup_repo`,校验备份包含当前 fork HEAD 后,允许原 fork 执行 Discard/同步当前指向库 |
+| `mirror_backup_repos` | 配合 `mirror_backup_enabled: "true"`,把每个 fork 的全部分支和 tag 备份到备份账号下的独立私有仓库;支持 `*` 表示所有发现到的 fork |
 
 示例:
 
 ```yaml
 protected_skip_repos: "gpt2api_432539"
+legacy_backup_repos: "*"
 backup_then_sync_repos: ""
-legacy_backup_repo: "Link-Start/fork-legacy-backups"
+legacy_backup_repo: "LinkStart413/fork-legacy-backups"
 legacy_backup_branch_prefix: "legacy"
+
+mirror_backup_enabled: "true"
+mirror_backup_owner: "LinkStart413"
+mirror_backup_repos: "*"
+
+backup_only: "true"
 ```
 
 如果同一个仓库同时出现在两个列表里,workflow 会报配置冲突并跳过该 fork,避免误操作。
 
-当前集中备份只覆盖 fork 默认分支,所以 `backup_then_sync_repos` 只会释放默认分支去对齐当前指向库;其他分支继续按普通同步规则处理。
+集中备份只覆盖 fork 默认分支,所以 `backup_then_sync_repos` 只会释放默认分支去对齐当前指向库;其他分支继续按普通同步规则处理。完整灾备用 `mirror_backup_enabled` + `mirror_backup_repos` 覆盖所有分支和 tag。
 
 **`size_drop_threshold` 可调** (默认 `0.10` = 10%):
 - `0.10` (默认) — 敏感,推荐大多数人

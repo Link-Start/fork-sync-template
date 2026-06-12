@@ -7,9 +7,9 @@ exclude_repos: ""
 # Protection list: create/reuse local-backup/*, then skip all sync/Discard work.
 protected_skip_repos: "gpt2api_432539"
 
-# Release list: centralized backup first, then allow the original fork to align
-# with its current GitHub upstream/source. Requires legacy_backup_repo.
-legacy_backup_repos: "aBaiAutoplus_asz798838958"
+# Centralized default-branch backup. "*" backs up every discovered fork into
+# legacy_backup_repo, one branch per fork, without modifying source forks.
+legacy_backup_repos: "*"
 backup_then_sync_repos: ""
 legacy_backup_repo: "LinkStart413/fork-legacy-backups"
 legacy_backup_branch_prefix: "legacy"

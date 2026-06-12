@@ -126,7 +126,7 @@ workflow 里 `GH_TOKEN` 会优先用 `secrets.FORK_SYNC_TOKEN`,没配置时才�
 ### 步骤 5: 手动触发一次验证
 
 1. 打开**配置仓库**的 `Actions` 标签
-2. 左侧选 "Sync My Forks (Exclude Claude)"
+2. 左侧选 "Sync My Forks"
 3. 右侧点 "Run workflow" → 绿色按钮
 4. 等 10-20 秒,展开运行记录看日志
 5. **预期成功日志长这样**:

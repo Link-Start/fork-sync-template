@@ -1,20 +1,15 @@
 
 
 # =============================================================================
-# GitHub Fork 自动同步工作流 - 动态发现版 (个人日常使用配置)
+# GitHub Fork 自动同步/备份工作流 - 动态发现版 (个人日常使用配置)
 # =============================================================================
-# 适用: 自动同步你名下指定 fork 到上游 (排除 claude 相关库)
+# 适用: 自动发现你名下 fork,按配置执行灾备或同步
 # 风格: 动态发现 (auto-discover) + 名称模式排除
 # 优势: GitHub CLI/API 调用,只 checkout 配置仓库脚本,不 checkout 目标 fork,自动备份,智能判断 ahead/behind
 #
 # 跟 examples/sync-dynamic.yml 的区别:
 #   - examples/sync-dynamic.yml: 通用模板,默认同步所有 fork
-#   - 本文件 (sync-dynamic.yml): 作者日常使用,自动排除 claude 相关 fork
-#
-# 排除规则 (在 EXCLUDE_PATTERN 配置):
-#   - 名称含 "claude" (大小写不敏感) 的 fork 会被跳过
-#   - 想排除别的: 改 EXCLUDE_PATTERN,比如 "anthropic" / "openai" / "test"
-#   - 不想排除: 改成 ""
+#   - 本文件 (sync-dynamic.yml): 作者日常使用,可通过 sync-config.yml 覆盖行为
 #
 # 一次性配置 (4 步):
 #   1. 仓库 Settings → Secrets and variables → Actions
@@ -27,7 +22,7 @@
 # 详细文档见 ../docs/ 目录
 # =============================================================================
 
-name: Sync My Forks (Exclude Claude)
+name: Sync My Forks
 
 on:
   # 改频率:把下面 3 行取消注释你想用的,注释掉不用的 (cron 是 UTC 时间)
@@ -142,6 +137,14 @@ on:
         options:
           - 'true'
           - 'false'
+      skip_mirror_backup:
+        description: '手动跳过独立仓库全分支备份 (true = 跳过; 适合只跑统一备份库)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
       backup_only:
         description: '只做独立仓库全分支备份,跳过同步/Discard'
         required: false
@@ -164,9 +167,7 @@ jobs:
       MY_OWNER: ${{ github.repository_owner }}
       # 多仓库同步请配置 FORK_SYNC_TOKEN (PAT);否则通常只能写当前配置仓库。
       GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
-      # 日常使用配置: 排除 claude 相关 fork
-      # 想排除别的关键词改这里 (大小写不敏感,匹配 fork 名称)
-      # 留空 = 不排除任何 fork
+      # 日常使用配置: 留空 = 不排除任何 fork
       DEFAULT_EXCLUDE_PATTERN: ''
       # 日常使用配置: 体积暴减告警阈值
       # 上游体积/fork 体积 < 此值时触发告警,跳过 fork
@@ -207,7 +208,7 @@ jobs:
       DEFAULT_BACKUP_THEN_SYNC_REPOS: ''
       # 只做集中默认分支备份,然后跳过同步/Discard。
       DEFAULT_LEGACY_BACKUP_REPOS: ''
-      # 集中备份仓库,例如 Link-Start/fork-legacy-backups;留空则禁用列表 2。
+      # 集中备份仓库,例如 LinkStart413/fork-legacy-backups;留空则禁用集中备份。
       DEFAULT_LEGACY_BACKUP_REPO: ''
       # 集中备份分支前缀。
       DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX: 'legacy'
@@ -274,8 +275,20 @@ jobs:
           ONLY_REPOS: ${{ inputs.only_repos }}
         run: scripts/discover-forks.sh
 
+      - name: Centralized default-branch backup
+        if: ${{ env.CONFIG_LEGACY_BACKUP_REPOS != '' || env.DEFAULT_LEGACY_BACKUP_REPOS != '' }}
+        env:
+          FORKS: ${{ steps.discover.outputs.forks }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+          BACKUP_GH_TOKEN: ${{ secrets.BACKUP_GH_TOKEN }}
+          LEGACY_BACKUP_REPOS: ${{ env.CONFIG_LEGACY_BACKUP_REPOS || env.DEFAULT_LEGACY_BACKUP_REPOS }}
+          LEGACY_BACKUP_REPO: ${{ env.CONFIG_LEGACY_BACKUP_REPO || env.DEFAULT_LEGACY_BACKUP_REPO }}
+          LEGACY_BACKUP_BRANCH_PREFIX: ${{ env.CONFIG_LEGACY_BACKUP_BRANCH_PREFIX || env.DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: scripts/legacy-backup-each-fork.sh
+
       - name: Full-ref mirror backup
-        if: ${{ inputs.mirror_backup == 'true' || env.CONFIG_MIRROR_BACKUP_ENABLED == 'true' }}
+        if: ${{ inputs.skip_mirror_backup != 'true' && (inputs.mirror_backup == 'true' || env.CONFIG_MIRROR_BACKUP_ENABLED == 'true') }}
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
           GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
@@ -373,5 +386,7 @@ jobs:
             ${{ runner.temp }}/sync-state.json
             ${{ runner.temp }}/mirror-backup-events.jsonl
             ${{ runner.temp }}/mirror-backup-summary.jsonl
+            ${{ runner.temp }}/legacy-backup-events.jsonl
+            ${{ runner.temp }}/legacy-backup-summary.jsonl
           retention-days: 30
           if-no-files-found: warn
