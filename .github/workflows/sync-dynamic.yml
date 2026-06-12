@@ -145,6 +145,14 @@ on:
         options:
           - 'true'
           - 'false'
+      skip_legacy_backup:
+        description: '手动跳过统一备份库默认分支备份 (true = 跳过; 适合只跑独立仓库备份)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
       backup_only:
         description: '只做独立仓库全分支备份,跳过同步/Discard'
         required: false
@@ -276,7 +284,7 @@ jobs:
         run: scripts/discover-forks.sh
 
       - name: Centralized default-branch backup
-        if: ${{ env.CONFIG_LEGACY_BACKUP_REPOS != '' || env.DEFAULT_LEGACY_BACKUP_REPOS != '' }}
+        if: ${{ inputs.skip_legacy_backup != 'true' && (env.CONFIG_LEGACY_BACKUP_REPOS != '' || env.DEFAULT_LEGACY_BACKUP_REPOS != '') }}
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
           GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
