@@ -173,7 +173,7 @@ process_backup_fork() {
   echo "Full-ref backup: $fork_owner/$fork_name"
   echo "------------------------------------------"
 
-  if [ -z "${BACKUP_GH_TOKEN:-}" ]; then
+  if [ -z "${BACKUP_GH_TOKEN:-}" ] && [ "${DRY_RUN:-false}" != "true" ]; then
     echo "    ! BACKUP_GH_TOKEN is required"
     json_log "$fork_name" "mirror_backup" "fail" reason="BACKUP_GH_TOKEN is required"
     echo "{\"name\":\"$fork_name\",\"result\":\"fail\",\"reason\":\"BACKUP_GH_TOKEN is required\"}" >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
@@ -187,7 +187,9 @@ process_backup_fork() {
     return 0
   fi
 
-  if ! backup_repo_full=$(ensure_backup_repo "$backup_repo_name" "$description"); then
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    backup_repo_full="$MIRROR_BACKUP_OWNER/$backup_repo_name"
+  elif ! backup_repo_full=$(ensure_backup_repo "$backup_repo_name" "$description"); then
     json_log "$fork_name" "mirror_backup" "fail" reason="create or access backup repo failed" backup_repo="$MIRROR_BACKUP_OWNER/$backup_repo_name"
     echo "{\"name\":\"$fork_name\",\"result\":\"fail\",\"reason\":\"create or access backup repo failed\"}" >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
     return 0
@@ -196,13 +198,12 @@ process_backup_fork() {
   repo_url="https://github.com/$fork_owner/$fork_name.git"
   dest_url="https://github.com/$backup_repo_full.git"
   tmp=$(mktemp -d)
-  source_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-  backup_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$BACKUP_GH_TOKEN" | base64 | tr -d '\n')"
+  source_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN:-dry-run}" | base64 | tr -d '\n')"
+  backup_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${BACKUP_GH_TOKEN:-dry-run}" | base64 | tr -d '\n')"
   summary_file="$tmp/push-summary.txt"
   script_path="$tmp/push-refs.sh"
 
   if [ "${DRY_RUN:-false}" = "true" ]; then
-    echo "    [DRY-RUN] would clone --mirror $repo_url"
     echo "    [DRY-RUN] would push snapshot refs to $backup_repo_full:$snapshot_prefix"
     json_log "$fork_name" "mirror_backup" "dry_run" backup_repo="$backup_repo_full" snapshot_prefix="$snapshot_prefix"
     echo "{\"name\":\"$fork_name\",\"result\":\"dry_run\",\"backup_repo\":\"$backup_repo_full\"}" >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
