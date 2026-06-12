@@ -67,6 +67,7 @@ enrich_fork_candidates() {
           name: .name,
           fork_owner: .owner.login,
           fork_default_branch: (.default_branch // "main"),
+          fork_size: (.size // 0),
           parent_name: (.parent.name // ""),
           parent_owner: (.parent.owner.login // ""),
           parent_default_branch: (.parent.default_branch // ""),

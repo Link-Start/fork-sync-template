@@ -55,6 +55,19 @@ json_log() {
   echo "$json" >> "${RUNNER_TEMP:-/tmp}/mirror-backup-events.jsonl"
 }
 
+git_error_detail() {
+  local path="$1"
+  [ -s "$path" ] || return 0
+  sed -E \
+    -e 's#x-access-token:[^@[:space:]]+#x-access-token:***#g' \
+    -e 's#https://[^@[:space:]]+@github.com/#https://***@github.com/#g' \
+    "$path" \
+    | tail -20 \
+    | tr '\r\n' ' ' \
+    | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' \
+    | cut -c 1-500
+}
+
 ensure_backup_repo() {
   local repo_name="$1" description="$2"
   local repo_full="$MIRROR_BACKUP_OWNER/$repo_name"
@@ -115,14 +128,21 @@ summary_file=$8
 
 : > "$summary_file"
 
+git_transport_config() {
+  printf '%s\n' \
+    -c credential.helper= \
+    -c http.version=HTTP/1.1 \
+    -c http.postBuffer=157286400
+}
+
 while IFS= read -r refline; do
   src_ref=${refline#refs/heads/}
   dst_ref=$(printf '%s' "$src_ref" | sed -E 's#[^A-Za-z0-9._/-]+#-#g; s#(^|/)[.]+#\1dot-#g; s#/[.]lock$#/dot-lock#g; s#[.]lock$#-lock#g; s#//+#/#g; s#^/+##; s#/+$##')
   [ -z "$dst_ref" ] && dst_ref=branch
-  git -C "$repo_dir" -c credential.helper= -c http.extraheader="$auth_header" push --quiet "$dest_remote" "$refline:refs/heads/$snapshot_prefix/$dst_ref"
+  git -C "$repo_dir" $(git_transport_config) -c http.extraheader="$auth_header" push --quiet "$dest_remote" "$refline:refs/heads/$snapshot_prefix/$dst_ref"
   echo "branch snapshot $src_ref refs/heads/$snapshot_prefix/$dst_ref" >> "$summary_file"
   if [ "$push_current" = "true" ]; then
-    git -C "$repo_dir" -c credential.helper= -c http.extraheader="$auth_header" push --quiet --force-with-lease "$dest_remote" "$refline:refs/heads/$current_prefix/$dst_ref"
+    git -C "$repo_dir" $(git_transport_config) -c http.extraheader="$auth_header" push --quiet --force-with-lease "$dest_remote" "$refline:refs/heads/$current_prefix/$dst_ref"
     echo "branch current $src_ref refs/heads/$current_prefix/$dst_ref" >> "$summary_file"
   fi
 done < <(git -C "$repo_dir" for-each-ref --format='%(refname)' refs/heads)
@@ -131,7 +151,7 @@ while IFS= read -r refline; do
   src_ref=${refline#refs/tags/}
   dst_ref=$(printf '%s' "$src_ref" | sed -E 's#[^A-Za-z0-9._/-]+#-#g; s#(^|/)[.]+#\1dot-#g; s#/[.]lock$#/dot-lock#g; s#[.]lock$#-lock#g; s#//+#/#g; s#^/+##; s#/+$##')
   [ -z "$dst_ref" ] && dst_ref=tag
-  git -C "$repo_dir" -c credential.helper= -c http.extraheader="$auth_header" push --quiet "$dest_remote" "$refline:refs/tags/$tag_prefix/$dst_ref"
+  git -C "$repo_dir" $(git_transport_config) -c http.extraheader="$auth_header" push --quiet "$dest_remote" "$refline:refs/tags/$tag_prefix/$dst_ref"
   echo "tag snapshot $src_ref refs/tags/$tag_prefix/$dst_ref" >> "$summary_file"
 done < <(git -C "$repo_dir" for-each-ref --format='%(refname)' refs/tags)
 SCRIPT
@@ -142,7 +162,7 @@ process_backup_fork() {
   local fork_b64="$1"
   local fork_json fork_name fork_owner backup_repo_name backup_repo_full repo_url dest_url
   local tmp source_auth_header backup_auth_header snapshot_id snapshot_prefix current_prefix tag_prefix summary_file script_path
-  local branch_count tag_count description push_current
+  local branch_count tag_count description push_current clone_err push_err detail
 
   fork_json=$(printf '%s' "$fork_b64" | base64 -d 2>/dev/null || echo "")
   if [ -z "$fork_json" ] || ! echo "$fork_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
@@ -202,6 +222,8 @@ process_backup_fork() {
   backup_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${BACKUP_GH_TOKEN:-dry-run}" | base64 | tr -d '\n')"
   summary_file="$tmp/push-summary.txt"
   script_path="$tmp/push-refs.sh"
+  clone_err="$tmp/clone.err"
+  push_err="$tmp/push.err"
 
   if [ "${DRY_RUN:-false}" = "true" ]; then
     echo "    [DRY-RUN] would push snapshot refs to $backup_repo_full:$snapshot_prefix"
@@ -211,10 +233,19 @@ process_backup_fork() {
     return 0
   fi
 
-  if ! git -c credential.helper= -c http.extraheader="$source_auth_header" clone --mirror --quiet "$repo_url" "$tmp/source.git"; then
+  if ! git -c credential.helper= -c http.extraheader="$source_auth_header" clone --mirror --quiet "$repo_url" "$tmp/source.git" 2>"$clone_err"; then
+    detail=$(git_error_detail "$clone_err")
     echo "    ! clone failed: $repo_url"
-    json_log "$fork_name" "mirror_backup" "fail" reason="clone failed" backup_repo="$backup_repo_full"
-    echo "{\"name\":\"$fork_name\",\"result\":\"fail\",\"reason\":\"clone failed\"}" >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
+    [ -z "$detail" ] || echo "      $detail"
+    json_log "$fork_name" "mirror_backup" "fail" reason="clone failed" backup_repo="$backup_repo_full" detail="$detail"
+    jq -n -c \
+      --arg name "$fork_name" \
+      --arg result "fail" \
+      --arg reason "clone failed" \
+      --arg backup_repo "$backup_repo_full" \
+      --arg detail "$detail" \
+      '{name: $name, result: $result, reason: $reason, backup_repo: $backup_repo, detail: $detail}' \
+      >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
     rm -rf "$tmp"
     return 0
   fi
@@ -226,10 +257,21 @@ process_backup_fork() {
   echo "    snapshot prefix: refs/heads/$snapshot_prefix/*"
 
   write_push_script "$script_path" "$backup_auth_header"
-  if ! "$script_path" "$tmp/source.git" "$dest_url" "$snapshot_prefix" "$current_prefix" "$tag_prefix" "$push_current" "$backup_auth_header" "$summary_file"; then
+  if ! "$script_path" "$tmp/source.git" "$dest_url" "$snapshot_prefix" "$current_prefix" "$tag_prefix" "$push_current" "$backup_auth_header" "$summary_file" 2>"$push_err"; then
+    detail=$(git_error_detail "$push_err")
     echo "    ! push failed"
-    json_log "$fork_name" "mirror_backup" "fail" reason="push failed" backup_repo="$backup_repo_full" branches="$branch_count" tags="$tag_count"
-    echo "{\"name\":\"$fork_name\",\"result\":\"fail\",\"reason\":\"push failed\"}" >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
+    [ -z "$detail" ] || echo "      $detail"
+    json_log "$fork_name" "mirror_backup" "fail" reason="push failed" backup_repo="$backup_repo_full" branches="$branch_count" tags="$tag_count" detail="$detail"
+    jq -n -c \
+      --arg name "$fork_name" \
+      --arg result "fail" \
+      --arg reason "push failed" \
+      --arg backup_repo "$backup_repo_full" \
+      --arg detail "$detail" \
+      --argjson branches "$branch_count" \
+      --argjson tags "$tag_count" \
+      '{name: $name, result: $result, reason: $reason, backup_repo: $backup_repo, detail: $detail, branches: $branches, tags: $tags}' \
+      >> "${RUNNER_TEMP:-/tmp}/mirror-backup-summary.jsonl"
     rm -rf "$tmp"
     return 0
   fi
