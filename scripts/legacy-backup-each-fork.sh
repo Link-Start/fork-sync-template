@@ -61,9 +61,9 @@ ensure_legacy_repo() {
   local repo_full="$1"
   local legacy_owner="${repo_full%%/*}"
   local legacy_repo="${repo_full#*/}"
-  local output err backup_login login_err
+  local repo_out repo_err backup_login login_err
 
-  if with_gh_token "${BACKUP_GH_TOKEN:-}" gh_api_capture output err "repos/$repo_full" --jq '.full_name' >/dev/null; then
+  if with_gh_token "${BACKUP_GH_TOKEN:-}" gh_api_capture repo_out repo_err "repos/$repo_full" --jq '.full_name' >/dev/null; then
     printf '%s\n' "$repo_full"
     return 0
   fi
@@ -81,7 +81,7 @@ ensure_legacy_repo() {
   fi
 
   echo "+ create private centralized backup repo: $repo_full" >&2
-  if ! with_gh_token "$BACKUP_GH_TOKEN" gh_api_capture output err "user/repos" \
+  if ! with_gh_token "$BACKUP_GH_TOKEN" gh_api_capture repo_out repo_err "user/repos" \
       -X POST \
       -f name="$legacy_repo" \
       -f private=true \
@@ -90,11 +90,11 @@ ensure_legacy_repo() {
       -f auto_init=false \
       -f description="Centralized default-branch fork backups" \
       --jq '.full_name' >/dev/null; then
-    echo "::error::create failed for $repo_full: $(api_error_message "$err")" >&2
+    echo "::error::create failed for $repo_full: $(api_error_message "$repo_err")" >&2
     return 1
   fi
-  if [ "$output" != "$repo_full" ]; then
-    echo "::error::create returned unexpected repo: ${output:-unknown}" >&2
+  if [ "$repo_out" != "$repo_full" ]; then
+    echo "::error::create returned unexpected repo: ${repo_out:-unknown}" >&2
     return 1
   fi
   printf '%s\n' "$repo_full"
