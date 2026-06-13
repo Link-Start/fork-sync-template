@@ -33,7 +33,6 @@ process_fork() {
   repo_in_csv() {
     local list="$1"
     [ -z "$list" ] && return 1
-    csv_lines "$list" | grep -Fxq "*" && return 0
     csv_lines "$list" | grep -Fxq "$FORK_REPO" && return 0
     csv_lines "$list" | grep -Fxq "$FORK_OWNER/$FORK_REPO"
   }
@@ -325,7 +324,7 @@ process_fork() {
     local branch_prefix="${LEGACY_BACKUP_BRANCH_PREFIX:-legacy}"
     local fork_sha fork_sha_err fork_sha_api legacy_full legacy_owner legacy_repo
     local safe_name primary_branch target_branch existing_sha existing_err repo_err legacy_repo_out
-    local tmp source_auth_header backup_auth_header timestamp push_err verify_ref
+    local tmp auth_header timestamp push_err verify_ref
 
     fork_sha_api="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$FORK_DEFAULT"
     if ! gh_api_capture fork_sha fork_sha_err "$fork_sha_api" --jq '.object.sha'; then
@@ -346,33 +345,10 @@ process_fork() {
     legacy_full=$(parse_repo_full_name "$backup_repo_config" "$MY_OWNER")
     legacy_owner=${legacy_full%%/*}
     legacy_repo=${legacy_full#*/}
-    if ! with_gh_token "${BACKUP_GH_TOKEN:-}" gh_api_capture legacy_repo_out repo_err "repos/$legacy_owner/$legacy_repo" --jq '.full_name' >/dev/null; then
-      if [ "${DRY_RUN:-false}" = "true" ]; then
-        echo "    [DRY-RUN] 集中备份仓库不可访问,实际运行时会尝试创建私有仓库: $legacy_full"
-      else
-        local backup_login login_err create_out create_err
-        if ! with_gh_token "${BACKUP_GH_TOKEN:-}" gh_api_capture backup_login login_err "user" --jq '.login' >/dev/null || \
-           [ "$backup_login" != "$legacy_owner" ]; then
-          echo "    ❌ 集中备份仓库不可访问: $legacy_full"
-          echo "    详情: BACKUP_GH_TOKEN 当前账号为 '${backup_login:-unknown}',不能自动创建 $legacy_owner/$legacy_repo"
-          record_failure "$FORK_DEFAULT" "集中备份仓库不可访问: $legacy_full" "legacy_backup_repo" "repos/$legacy_owner/$legacy_repo" "$repo_err" "legacy_backup"
-          return 1
-        fi
-        echo "    📦 集中备份仓库不存在,创建私有仓库: $legacy_full"
-        if ! with_gh_token "${BACKUP_GH_TOKEN:-}" gh_api_capture create_out create_err "user/repos" \
-            -X POST \
-            -f name="$legacy_repo" \
-            -f private=true \
-            -f has_issues=false \
-            -f has_wiki=false \
-            -f auto_init=false \
-            -f description="Centralized default-branch fork backups" \
-            --jq '.full_name' >/dev/null || [ "$create_out" != "$legacy_full" ]; then
-          echo "    ❌ 集中备份仓库创建失败: $legacy_full"
-          record_failure "$FORK_DEFAULT" "集中备份仓库创建失败: $legacy_full" "legacy_backup_repo" "repos/$legacy_owner/$legacy_repo" "$create_err" "legacy_backup"
-          return 1
-        fi
-      fi
+    if ! gh_api_capture legacy_repo_out repo_err "repos/$legacy_owner/$legacy_repo" --jq '.full_name' >/dev/null; then
+      echo "    ❌ 集中备份仓库不可访问: $legacy_full"
+      record_failure "$FORK_DEFAULT" "集中备份仓库不可访问: $legacy_full" "legacy_backup_repo" "repos/$legacy_owner/$legacy_repo" "$repo_err" "legacy_backup"
+      return 1
     fi
 
     safe_name=$(safe_legacy_branch_name "$FORK_REPO")
@@ -390,22 +366,21 @@ process_fork() {
     fi
 
     tmp=$(mktemp -d) || return 1
-    source_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-    backup_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${BACKUP_GH_TOKEN:-$GH_TOKEN}" | base64 | tr -d '\n')"
+    auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
     push_err="$tmp/push.err"
 
     if ! git -C "$tmp" init -q || \
        ! git -C "$tmp" remote add fork "https://github.com/$FORK_OWNER/$FORK_REPO.git" || \
        ! git -C "$tmp" remote add legacy "https://github.com/$legacy_owner/$legacy_repo.git" || \
-       ! git -C "$tmp" -c credential.helper= -c http.extraheader="$source_auth_header" fetch --quiet --no-tags fork "refs/heads/$FORK_DEFAULT:refs/sync/current"; then
+       ! git -C "$tmp" -c http.extraheader="$auth_header" fetch --quiet --no-tags fork "refs/heads/$FORK_DEFAULT:refs/sync/current"; then
       rm -rf "$tmp"
       echo "    ❌ 集中备份失败: 无法读取 fork 默认分支"
       record_failure "$FORK_DEFAULT" "集中备份失败: 无法读取 fork 默认分支" "legacy_backup" "$fork_sha_api" "" "legacy_backup"
       return 1
     fi
 
-    if with_gh_token "${BACKUP_GH_TOKEN:-}" gh_api_capture existing_sha existing_err "repos/$legacy_owner/$legacy_repo/git/ref/heads/$primary_branch" --jq '.object.sha'; then
-      if git -C "$tmp" -c credential.helper= -c http.extraheader="$backup_auth_header" fetch --quiet --no-tags legacy "refs/heads/$primary_branch:refs/sync/legacy"; then
+    if gh_api_capture existing_sha existing_err "repos/$legacy_owner/$legacy_repo/git/ref/heads/$primary_branch" --jq '.object.sha'; then
+      if git -C "$tmp" -c http.extraheader="$auth_header" fetch --quiet --no-tags legacy "refs/heads/$primary_branch:refs/sync/legacy"; then
         if git -C "$tmp" merge-base --is-ancestor refs/sync/current refs/sync/legacy; then
           echo "    📦 集中备份已包含当前 HEAD: $legacy_full:$primary_branch → ${fork_sha:0:7}"
           log_event "$FORK_REPO" "legacy_backup" "skip" \
@@ -427,7 +402,7 @@ process_fork() {
       fi
     fi
 
-    if ! git -C "$tmp" -c credential.helper= -c http.extraheader="$backup_auth_header" push --quiet legacy "refs/sync/current:refs/heads/$target_branch" 2>"$push_err"; then
+    if ! git -C "$tmp" -c http.extraheader="$auth_header" push --quiet legacy "refs/sync/current:refs/heads/$target_branch" 2>"$push_err"; then
       echo "    ❌ 集中备份 push 失败: $legacy_full:$target_branch"
       record_failure "$FORK_DEFAULT" "集中备份 push 失败: $legacy_full:$target_branch" "legacy_backup" "repos/$legacy_owner/$legacy_repo/git/refs/heads/$target_branch" "$(cat "$push_err")" "legacy_backup"
       rm -rf "$tmp"
@@ -435,7 +410,7 @@ process_fork() {
     fi
 
     verify_ref="refs/sync/verify-${fork_sha:0:7}"
-    if ! git -C "$tmp" -c credential.helper= -c http.extraheader="$backup_auth_header" fetch --quiet --no-tags legacy "refs/heads/$target_branch:$verify_ref" || \
+    if ! git -C "$tmp" -c http.extraheader="$auth_header" fetch --quiet --no-tags legacy "refs/heads/$target_branch:$verify_ref" || \
        ! git -C "$tmp" merge-base --is-ancestor refs/sync/current "$verify_ref"; then
       echo "    ❌ 集中备份校验失败: $legacy_full:$target_branch 不包含当前 HEAD"
       record_failure "$FORK_DEFAULT" "集中备份校验失败: 备份分支不包含当前 fork HEAD" "legacy_backup" "repos/$legacy_owner/$legacy_repo/git/refs/heads/$target_branch" "" "legacy_backup"
@@ -591,39 +566,22 @@ process_fork() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   # ----- 阶段 0: 列表策略与跳过检查 -----
-  local IN_PROTECTED_SKIP=false IN_BACKUP_THEN_SYNC=false IN_LEGACY_BACKUP=false
+  local IN_PROTECTED_SKIP=false IN_BACKUP_THEN_SYNC=false
   if repo_in_csv "${PROTECTED_SKIP_REPOS:-}"; then
     IN_PROTECTED_SKIP=true
-  fi
-  if repo_in_csv "${LEGACY_BACKUP_REPOS:-}"; then
-    IN_LEGACY_BACKUP=true
   fi
   if repo_in_csv "${BACKUP_THEN_SYNC_REPOS:-}"; then
     IN_BACKUP_THEN_SYNC=true
   fi
-  if { [ "$IN_PROTECTED_SKIP" = "true" ] && { [ "$IN_LEGACY_BACKUP" = "true" ] || [ "$IN_BACKUP_THEN_SYNC" = "true" ]; }; } || \
-     { [ "$IN_LEGACY_BACKUP" = "true" ] && [ "$IN_BACKUP_THEN_SYNC" = "true" ]; }; then
-    echo "    ❌ 配置冲突: 同时命中 protected_skip_repos / legacy_backup_repos / backup_then_sync_repos 中多个列表"
-    record_failure "$FORK_DEFAULT" "配置冲突: 同时命中多个备份/同步策略列表" "config" "" "" "config"
+  if [ "$IN_PROTECTED_SKIP" = "true" ] && [ "$IN_BACKUP_THEN_SYNC" = "true" ]; then
+    echo "    ❌ 配置冲突: 同时命中 protected_skip_repos 和 backup_then_sync_repos"
+    record_failure "$FORK_DEFAULT" "配置冲突: 同时命中 protected_skip_repos 和 backup_then_sync_repos" "config" "" "" "config"
     write_fork_summary "fail"
     return 0
   fi
   if [ "$IN_PROTECTED_SKIP" = "true" ]; then
     log_event "$FORK_REPO" "policy" "protected_skip" reason="protected_skip_repos"
     protect_and_skip_fork "protected_skip_repos 命中,已保护备份并跳过同步" "该列表只做 local-backup 保护备份,不会进入集中备份库,也不会执行 Discard commits"
-    return 0
-  fi
-  if [ "$IN_LEGACY_BACKUP" = "true" ]; then
-    echo "🧭 legacy_backup_repos 命中: 只集中备份默认分支,然后跳过同步/Discard"
-    log_event "$FORK_REPO" "policy" "legacy_backup" reason="legacy_backup_repos"
-    if ensure_legacy_backup_contains_current_head; then
-      LOCAL_BACKED_UP+=("$FORK_DEFAULT:legacy")
-      SKIPPED+=("$FORK_REPO")
-      write_fork_summary "skip" "legacy_backup_repos 命中,已集中备份默认分支并跳过同步"
-    else
-      echo "    🛑 集中备份未完成,跳过该 fork 同步以避免丢失旧代码"
-      write_fork_summary "fail"
-    fi
     return 0
   fi
   if [ "$IN_BACKUP_THEN_SYNC" = "true" ]; then

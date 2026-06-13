@@ -122,7 +122,7 @@ Link-Start/
 fork-sync-template/
 ├── .github/
 │   └── workflows/
-│       └── sync-dynamic.yml          # 作者日常使用版 (动态发现 + 可被 sync-config.yml 覆盖)
+│       └── sync-dynamic.yml          # 作者日常使用版 (动态发现 + 默认排除 claude 相关)
 ├── examples/
 │   ├── sync-dynamic.yml              # 通用模板: 动态发现版 (同步所有 fork)
 │   └── sync-static.yml               # 通用模板: 静态 matrix 版 (要手写 fork 列表)

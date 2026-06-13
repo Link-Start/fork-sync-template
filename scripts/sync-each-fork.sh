@@ -66,7 +66,7 @@ source "$SCRIPT_DIR/fork-worker.sh"
 export -f process_fork
 export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_MODE SKIP_LIST DISCARD_LOCAL_CHANGES
 export MAX_BRANCHES_PER_FORK SKIP_BRANCH_PATTERNS FULL_BRANCH_SYNC_REPOS BRANCH_LIMIT_GROUPS BRANCH_LIMIT_OVERRIDES
-export PROTECTED_SKIP_REPOS LEGACY_BACKUP_REPOS BACKUP_THEN_SYNC_REPOS LEGACY_BACKUP_REPO LEGACY_BACKUP_BRANCH_PREFIX DRY_RUN BACKUP_GH_TOKEN
+export PROTECTED_SKIP_REPOS BACKUP_THEN_SYNC_REPOS LEGACY_BACKUP_REPO LEGACY_BACKUP_BRANCH_PREFIX DRY_RUN
 
 # API 限流检查:剩余配额 = 0 时睡到 reset
 # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
@@ -94,14 +94,7 @@ check_rate_limit() {
 check_rate_limit
 
 # 并发跑 (MAX_PARALLEL 个同时),用 base64 传递 JSON 避免 shell/xargs 吃掉引号
-if [ "$MAX_PARALLEL" = "1" ]; then
-  while IFS= read -r fork_b64; do
-    [ -z "$fork_b64" ] && continue
-    ( process_fork "$fork_b64" )
-  done < <(echo "$FORKS" | jq -r '.[] | @base64')
-else
-  echo "$FORKS" | jq -r '.[] | @base64' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$1"' _ {}
-fi
+echo "$FORKS" | jq -r '.[] | @base64' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$1"' _ {}
 
 # 按原始 fork 顺序输出所有 log
 echo "$FORKS" | jq -r '.[].name' | while read -r name; do

@@ -23,13 +23,8 @@ echo "📄 找到 .github/sync-config.yml,加载覆盖:"
 for KEY in exclude_pattern exclude_repos size_drop_threshold size_check_exempt \
            max_parallel max_branches_per_fork skip_branch_patterns full_branch_sync_repos \
            branch_limit_groups branch_limit_overrides sync_mode webhook_type \
-           discard_local_changes backup_only protected_skip_repos legacy_backup_repos \
-           backup_then_sync_repos legacy_backup_repo legacy_backup_branch_prefix mirror_backup_enabled \
-           mirror_backup_owner mirror_backup_repo_prefix mirror_backup_repo_suffix \
-           mirror_backup_repos \
-           mirror_backup_max_parallel mirror_backup_snapshot_prefix \
-           mirror_backup_current_prefix mirror_backup_tag_prefix \
-           mirror_backup_update_current; do
+           discard_local_changes protected_skip_repos backup_then_sync_repos \
+           legacy_backup_repo legacy_backup_branch_prefix; do
   VAL=$(echo "$CONFIG_YAML" | grep -E "^${KEY}:" | head -1 \
         | sed -E "s/^${KEY}:[[:space:]]*//" \
         | sed 's/^["'"'"']//;s/["'"'"']$//' || echo "")

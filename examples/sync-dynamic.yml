@@ -7,7 +7,7 @@
 #
 # 跟 .github/workflows/sync-dynamic.yml 的区别:
 #   - 本文件 (通用模板): 默认同步所有 fork,不做任何排除
-#   - .github/workflows/sync-dynamic.yml (作者日常使用): 会按 sync-config.yml 覆盖成个人灾备/同步策略
+#   - .github/workflows/sync-dynamic.yml (作者日常使用): 自动排除 claude 相关 fork
 #
 # 启用步骤 (在 fork 后的仓库):
 #   1. 把本文件复制到 .github/workflows/sync-dynamic.yml
@@ -124,38 +124,6 @@ on:
         options:
           - force
           - keep
-      mirror_backup:
-        description: '是否同时把 fork 全部分支/tag 备份到独立仓库'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      skip_mirror_backup:
-        description: '手动跳过独立仓库全分支备份 (true = 跳过; 适合只跑统一备份库)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      skip_legacy_backup:
-        description: '手动跳过统一备份库默认分支备份 (true = 跳过; 适合只跑独立仓库备份)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      backup_only:
-        description: '只做备份,跳过同步/Discard'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
 
 # 显式声明需要写权限
 permissions:
@@ -196,29 +164,14 @@ jobs:
       # keep  = 去重备份本地修改后,使用 merge-upstream 合并上游更新
       # 纯 ahead 且 upstream 无新增时跳过,不备份也不写分支
       DEFAULT_DISCARD_LOCAL_CHANGES: 'force'
-      # 只做独立仓库全分支备份,不执行同步/Discard。
-      DEFAULT_BACKUP_ONLY: 'false'
       # 保护跳过列表: 只做 local-backup 保护备份,不进入同步/Discard。
       DEFAULT_PROTECTED_SKIP_REPOS: ''
-      # 只做集中默认分支备份,然后跳过同步/Discard。
-      DEFAULT_LEGACY_BACKUP_REPOS: ''
       # 集中备份后同步列表: 先备份到统一仓库,再允许原 fork 对齐当前指向库。
       DEFAULT_BACKUP_THEN_SYNC_REPOS: ''
-      # 集中备份仓库,例如 LinkStart413/fork-legacy-backups;留空则禁用集中备份。
+      # 集中备份仓库,例如 Link-Start/fork-legacy-backups;留空则禁用列表 2。
       DEFAULT_LEGACY_BACKUP_REPO: ''
       # 集中备份分支前缀。
       DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX: 'legacy'
-      # 单独仓库全分支备份默认关闭;打开后会按 fork 仓库名在备份账号创建/更新私有备份库。
-      DEFAULT_MIRROR_BACKUP_ENABLED: 'false'
-      DEFAULT_MIRROR_BACKUP_OWNER: 'LinkStart413'
-      DEFAULT_MIRROR_BACKUP_REPOS: ''
-      DEFAULT_MIRROR_BACKUP_REPO_PREFIX: ''
-      DEFAULT_MIRROR_BACKUP_REPO_SUFFIX: ''
-      DEFAULT_MIRROR_BACKUP_MAX_PARALLEL: '1'
-      DEFAULT_MIRROR_BACKUP_SNAPSHOT_PREFIX: 'snapshots'
-      DEFAULT_MIRROR_BACKUP_CURRENT_PREFIX: 'current'
-      DEFAULT_MIRROR_BACKUP_TAG_PREFIX: 'backup'
-      DEFAULT_MIRROR_BACKUP_UPDATE_CURRENT: 'true'
     steps:
       - name: Checkout config repository
         uses: actions/checkout@v4
@@ -226,18 +179,10 @@ jobs:
       # =====================================================================
       # Step 0: 读 .github/sync-config.yml (用户配置文件,优先级: input > config > default)
       # 支持的 key: exclude_pattern / exclude_repos / size_drop_threshold /
-      #            size_check_exempt / max_parallel / max_branches_per_fork /
-      #            skip_branch_patterns / full_branch_sync_repos /
-      #            branch_limit_groups / branch_limit_overrides /
-      #            sync_mode / webhook_type / discard_local_changes /
-      #            backup_only / protected_skip_repos / legacy_backup_repos /
+      #            size_check_exempt / max_parallel / sync_mode / webhook_type /
+      #            discard_local_changes / protected_skip_repos /
       #            backup_then_sync_repos / legacy_backup_repo /
-      #            legacy_backup_branch_prefix / mirror_backup_enabled /
-      #            mirror_backup_owner / mirror_backup_repos /
-      #            mirror_backup_repo_prefix / mirror_backup_repo_suffix /
-      #            mirror_backup_max_parallel / mirror_backup_snapshot_prefix /
-      #            mirror_backup_current_prefix / mirror_backup_tag_prefix /
-      #            mirror_backup_update_current
+      #            legacy_backup_branch_prefix
       # =====================================================================
       - name: Read sync config
         id: read-config
@@ -263,41 +208,10 @@ jobs:
           ONLY_REPOS: ${{ inputs.only_repos }}
         run: scripts/discover-forks.sh
 
-      - name: Centralized default-branch backup
-        if: ${{ inputs.skip_legacy_backup != 'true' && (env.CONFIG_LEGACY_BACKUP_REPOS != '' || env.DEFAULT_LEGACY_BACKUP_REPOS != '') }}
-        env:
-          FORKS: ${{ steps.discover.outputs.forks }}
-          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
-          BACKUP_GH_TOKEN: ${{ secrets.BACKUP_GH_TOKEN }}
-          LEGACY_BACKUP_REPOS: ${{ env.CONFIG_LEGACY_BACKUP_REPOS || env.DEFAULT_LEGACY_BACKUP_REPOS }}
-          LEGACY_BACKUP_REPO: ${{ env.CONFIG_LEGACY_BACKUP_REPO || env.DEFAULT_LEGACY_BACKUP_REPO }}
-          LEGACY_BACKUP_BRANCH_PREFIX: ${{ env.CONFIG_LEGACY_BACKUP_BRANCH_PREFIX || env.DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: scripts/legacy-backup-each-fork.sh
-
-      - name: Full-ref mirror backup
-        if: ${{ inputs.skip_mirror_backup != 'true' && (inputs.mirror_backup == 'true' || env.CONFIG_MIRROR_BACKUP_ENABLED == 'true') }}
-        env:
-          FORKS: ${{ steps.discover.outputs.forks }}
-          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
-          BACKUP_GH_TOKEN: ${{ secrets.BACKUP_GH_TOKEN }}
-          MIRROR_BACKUP_OWNER: ${{ env.CONFIG_MIRROR_BACKUP_OWNER || env.DEFAULT_MIRROR_BACKUP_OWNER }}
-          MIRROR_BACKUP_REPOS: ${{ env.CONFIG_MIRROR_BACKUP_REPOS || env.DEFAULT_MIRROR_BACKUP_REPOS }}
-          MIRROR_BACKUP_REPO_PREFIX: ${{ env.CONFIG_MIRROR_BACKUP_REPO_PREFIX || env.DEFAULT_MIRROR_BACKUP_REPO_PREFIX }}
-          MIRROR_BACKUP_REPO_SUFFIX: ${{ env.CONFIG_MIRROR_BACKUP_REPO_SUFFIX || env.DEFAULT_MIRROR_BACKUP_REPO_SUFFIX }}
-          MIRROR_BACKUP_MAX_PARALLEL: ${{ env.CONFIG_MIRROR_BACKUP_MAX_PARALLEL || env.DEFAULT_MIRROR_BACKUP_MAX_PARALLEL }}
-          MIRROR_BACKUP_SNAPSHOT_PREFIX: ${{ env.CONFIG_MIRROR_BACKUP_SNAPSHOT_PREFIX || env.DEFAULT_MIRROR_BACKUP_SNAPSHOT_PREFIX }}
-          MIRROR_BACKUP_CURRENT_PREFIX: ${{ env.CONFIG_MIRROR_BACKUP_CURRENT_PREFIX || env.DEFAULT_MIRROR_BACKUP_CURRENT_PREFIX }}
-          MIRROR_BACKUP_TAG_PREFIX: ${{ env.CONFIG_MIRROR_BACKUP_TAG_PREFIX || env.DEFAULT_MIRROR_BACKUP_TAG_PREFIX }}
-          MIRROR_BACKUP_UPDATE_CURRENT: ${{ env.CONFIG_MIRROR_BACKUP_UPDATE_CURRENT || env.DEFAULT_MIRROR_BACKUP_UPDATE_CURRENT }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: scripts/mirror-backup-each-fork.sh
-
       # =====================================================================
       # Step 2: 并发同步 fork (脚本化实现,避免 workflow YAML 继续膨胀)
       # =====================================================================
       - name: Sync each fork
-        if: ${{ inputs.backup_only != 'true' && env.CONFIG_BACKUP_ONLY != 'true' }}
         env:
           FORKS: ${{ steps.discover.outputs.forks }}
           MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
@@ -309,11 +223,9 @@ jobs:
           BRANCH_LIMIT_GROUPS: ${{ inputs.branch_limit_groups || env.CONFIG_BRANCH_LIMIT_GROUPS || env.DEFAULT_BRANCH_LIMIT_GROUPS }}
           BRANCH_LIMIT_OVERRIDES: ${{ inputs.branch_limit_overrides || env.CONFIG_BRANCH_LIMIT_OVERRIDES || env.DEFAULT_BRANCH_LIMIT_OVERRIDES }}
           PROTECTED_SKIP_REPOS: ${{ env.CONFIG_PROTECTED_SKIP_REPOS || env.DEFAULT_PROTECTED_SKIP_REPOS }}
-          LEGACY_BACKUP_REPOS: ${{ env.CONFIG_LEGACY_BACKUP_REPOS || env.DEFAULT_LEGACY_BACKUP_REPOS }}
           BACKUP_THEN_SYNC_REPOS: ${{ env.CONFIG_BACKUP_THEN_SYNC_REPOS || env.DEFAULT_BACKUP_THEN_SYNC_REPOS }}
           LEGACY_BACKUP_REPO: ${{ env.CONFIG_LEGACY_BACKUP_REPO || env.DEFAULT_LEGACY_BACKUP_REPO }}
           LEGACY_BACKUP_BRANCH_PREFIX: ${{ env.CONFIG_LEGACY_BACKUP_BRANCH_PREFIX || env.DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX }}
-          BACKUP_GH_TOKEN: ${{ secrets.BACKUP_GH_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
           CONFIG_REPO: ${{ github.event.repository.name }}
@@ -373,9 +285,5 @@ jobs:
             ${{ runner.temp }}/events.jsonl
             ${{ runner.temp }}/events.csv
             ${{ runner.temp }}/sync-state.json
-            ${{ runner.temp }}/mirror-backup-events.jsonl
-            ${{ runner.temp }}/mirror-backup-summary.jsonl
-            ${{ runner.temp }}/legacy-backup-events.jsonl
-            ${{ runner.temp }}/legacy-backup-summary.jsonl
           retention-days: 30
           if-no-files-found: warn

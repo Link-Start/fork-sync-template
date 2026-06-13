@@ -18,39 +18,15 @@ exclude_repos: ""
 # 命中后只创建/复用 fork 内 local-backup/* 保护备份,然后跳过同步和 Discard
 protected_skip_repos: ""
 
-# 集中默认分支备份列表,逗号分隔;支持 repo、owner/repo 或 "*"
-# "*" = 本次发现的所有 fork。命中后把 fork 默认分支备份到 legacy_backup_repo。
-# 在 backup_only=true 时,该集中备份会独立执行,不会触发同步或 Discard。
-legacy_backup_repos: ""
-
 # 集中备份后同步列表,逗号分隔;支持 repo 或 owner/repo
 # 命中后会先把 fork 默认分支备份到 legacy_backup_repo,校验成功后才允许原 fork 对齐当前指向库
 backup_then_sync_repos: ""
 
-# 集中备份仓库;legacy_backup_repos 或 backup_then_sync_repos 非空时必填,例如 LinkStart413/fork-legacy-backups
+# 集中备份仓库;backup_then_sync_repos 非空时必填,例如 Link-Start/fork-legacy-backups
 legacy_backup_repo: ""
 
 # 集中备份分支前缀,最终分支类似 legacy/repo_name
 legacy_backup_branch_prefix: "legacy"
-
-# 单独仓库全分支备份;开启后会在同步/Discard 前把每个 fork 的所有分支和 tag
-# 备份到 mirror_backup_owner 下按 fork 仓库名命名的私有非 fork 仓库。
-# 需要配置 secrets.BACKUP_GH_TOKEN;如果要自动建库,token 必须属于 mirror_backup_owner。
-mirror_backup_enabled: "false"
-mirror_backup_owner: "LinkStart413"
-# 留空或 "*" = 备份所有本次发现的 fork;非空 = 只备份这些 repo 或 owner/repo
-mirror_backup_repos: ""
-mirror_backup_repo_prefix: ""
-mirror_backup_repo_suffix: ""
-mirror_backup_max_parallel: 1
-mirror_backup_snapshot_prefix: "snapshots"
-mirror_backup_current_prefix: "current"
-mirror_backup_tag_prefix: "backup"
-mirror_backup_update_current: "true"
-
-# 只做独立仓库全分支备份,跳过后续同步/Discard。
-# 适合把本模板作为灾备调度器使用。
-backup_only: "false"
 
 # 上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,跳过 fork)
 # 0.10 = 敏感 (推荐)  0.30 = 宽松  0 = 关闭

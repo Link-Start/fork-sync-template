@@ -113,16 +113,14 @@ fork 上**同时存在** dev 和 develop,dev 内容不变,develop 内容跟 upst
 | 列表 | 处理 |
 |---|---|
 | `protected_skip_repos` | 只创建/复用 fork 内 `local-backup/*` 保护备份,然后跳过;不集中备份,不 Discard |
-| `legacy_backup_repos` | 只把当前 fork 默认分支备份到统一备份仓库;支持 `*` 表示本次发现的所有 fork |
 | `backup_then_sync_repos` | 先把当前 fork 默认分支备份到统一备份仓库,校验备份包含当前 HEAD,然后允许原 fork 对齐当前 GitHub 指向库 |
 
 配置示例:
 
 ```yaml
 protected_skip_repos: "repo_source_broken"
-legacy_backup_repos: "*"
 backup_then_sync_repos: "repo_release_to_current_upstream"
-legacy_backup_repo: "LinkStart413/fork-legacy-backups"
+legacy_backup_repo: "Link-Start/fork-legacy-backups"
 legacy_backup_branch_prefix: "legacy"
 ```
 
@@ -130,21 +128,4 @@ legacy_backup_branch_prefix: "legacy"
 
 `backup_then_sync_repos` 的安全门槛:当前指向库必须可访问、不是空库、没有体积暴减;统一备份仓库必须配置且备份校验成功。任一条件不满足,不会 Discard 原 fork。
 
-集中备份只备份 fork 默认分支,所以 `backup_then_sync_repos` 只会释放默认分支去对齐当前指向库;其他分支仍按普通同步规则处理。如果设置 `backup_only: "true"`,集中备份会作为独立步骤执行,不会触发同步或 Discard。
-
-如果要完整灾备所有分支和 tag,开启单独仓库全分支备份:
-
-```yaml
-mirror_backup_enabled: "true"
-mirror_backup_owner: "LinkStart413"
-mirror_backup_repos: "*"
-mirror_backup_repo_prefix: ""
-mirror_backup_repo_suffix: ""
-mirror_backup_snapshot_prefix: "snapshots"
-mirror_backup_current_prefix: "current"
-mirror_backup_tag_prefix: "backup"
-mirror_backup_update_current: "true"
-backup_only: "true"
-```
-
-该模式会在同步/Discard 前按 fork 仓库名创建或复用 `LinkStart413/<fork-repo>` 私有非 fork 仓库,把所有分支推到 `snapshots/<时间戳>/*`,把 tag 推到 `backup/<时间戳>/*`,并可选更新 `current/*` 方便查看。创建/写入备份账号需要配置 `secrets.BACKUP_GH_TOKEN`;如果要自动建库,该 token 必须属于 `mirror_backup_owner`。
+当前集中备份只备份 fork 默认分支,所以 `backup_then_sync_repos` 只会释放默认分支去对齐当前指向库;其他分支仍按普通同步规则处理。

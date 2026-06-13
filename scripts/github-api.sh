@@ -100,27 +100,6 @@ gh_api_write_capture() {
 }
 export -f gh_api_write_capture
 
-with_gh_token() {
-  local token="$1"
-  shift
-  local old_token="${GH_TOKEN:-}"
-  local had_token="${GH_TOKEN+x}"
-  if [ -n "$token" ]; then
-    GH_TOKEN="$token"
-    export GH_TOKEN
-  fi
-  "$@"
-  local rc=$?
-  if [ -n "$had_token" ]; then
-    GH_TOKEN="$old_token"
-    export GH_TOKEN
-  else
-    unset GH_TOKEN
-  fi
-  return "$rc"
-}
-export -f with_gh_token
-
 api_error_field() {
   local raw="$1" field="$2" json
   json=$(awk 'match($0, /^\{.*\}/) {print substr($0, RSTART, RLENGTH); exit}' <<<"$raw")
