@@ -12,8 +12,8 @@ source "$SCRIPT_DIR/git-cli.sh"
 LOG_DIR=$(mktemp -d)
 trap 'rm -rf "$LOG_DIR"' EXIT
 
-# 清空旧 events (新 run 重新开始)
-: > "$RUNNER_TEMP/events.jsonl"
+# 初始化事件文件。前置步骤可能已经写入 workflow 禁用事件,不要覆盖。
+: >> "$RUNNER_TEMP/events.jsonl"
 : > "$RUNNER_TEMP/summary.jsonl"
 
 if ! echo "$FORKS" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -122,7 +122,7 @@ if [ -f "$RUNNER_TEMP/events.jsonl" ] && [ -s "$RUNNER_TEMP/events.jsonl" ]; the
 
   # 生成 CSV 报告 (Item 12)
   # 预定义所有 log_event 调用的 k=v 字段,缺则空
-  CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch legacy_backup_repo legacy_backup_branch total_branches selected_branches branch_limit branch_limit_source skipped_by_pattern skipped_by_limit"
+  CSV_KEYS="ts fork action result mode run_id upstream default_branch reason context hint api_status api_message api_path fork_kb upstream_kb ratio_pct threshold_pct tag sha upstream_sha branch behind ahead pr new synced failed skipped local_backup status backup_branch legacy_backup_repo legacy_backup_branch total_branches selected_branches branch_limit branch_limit_source skipped_by_pattern skipped_by_limit workflow_id workflow_name workflow_path workflow_state total_workflows disabled_workflows dry_run_workflows kept_workflows already_disabled_workflows failed_workflows"
   # header
   echo "$CSV_KEYS" | tr ' ' '\n' | jq -R '.' | jq -rs '@csv' > "$RUNNER_TEMP/events.csv"
   # body

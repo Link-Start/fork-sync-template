@@ -12,3 +12,9 @@ protected_skip_repos: "gpt2api_432539"
 backup_then_sync_repos: ""
 legacy_backup_repo: ""
 legacy_backup_branch_prefix: "legacy"
+
+# Disable GitHub Actions workflows in every managed fork before syncing.
+# These forks are mirror targets; local work should happen on separate branches.
+disable_fork_workflows: true
+disable_fork_workflows_repos: "all"
+disable_fork_workflows_keep_patterns: ""

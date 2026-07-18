@@ -20,6 +20,7 @@
 - ✅ master / main 双默认分支兼容
 - ✅ 上游删库 / archived 友好 skip
 - ✅ 新分支自动拉,旧分支自动保
+- ✅ 可选同步前禁用 fork 里的 GitHub Actions workflows,防止 fork 自己的定时任务制造分歧
 - ✅ 跳过机制灵活 (per-fork `.no-sync` 或 config-repo `skip.txt`)
 
 ---
@@ -41,6 +42,7 @@ fork-sync-template/
 ├── scripts/                           # 动态 workflow 运行脚本和 helper
 │   ├── read-config.sh                 # 读取 .github/sync-config.yml 覆盖配置
 │   ├── discover-forks.sh              # 动态发现 fork 并补齐 upstream 元数据
+│   ├── disable-fork-workflows.sh      # 可选:同步前禁用目标 fork 的 Actions workflows
 │   ├── sync-each-fork.sh              # 并发同步编排
 │   ├── fork-worker.sh                 # 单 fork 同步主流程
 │   ├── detect-drift.sh                # 连续失败 drift 检测和状态写回
@@ -73,7 +75,7 @@ fork-sync-template/
 最简单,不用维护 fork 列表:
 
 1. **Fork 这个仓库** (点页面右上角的 Fork 按钮)
-2. **配置跨仓库 token**: 在配置仓库 Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`,值用你自己的 PAT,至少给目标 fork 仓库 `Contents: Read and write` 权限。
+2. **配置跨仓库 token**: 在配置仓库 Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`,值用你自己的 PAT。普通同步至少给目标 fork 仓库 `Contents: Read and write`;如果启用“同步前禁用 fork workflows”,还要给目标 fork `Actions: Read and write`。
 3. **开 workflow 写权限**: 进你 fork 后的仓库 → Settings → Actions → General → Workflow permissions → 选 **Read and write permissions** → Save
 4. **开定时任务**: 进 Actions 标签页 → 看到黄色提示 "Workflows aren't being run on this forked repository" → 点 **"I understand my workflows, go ahead and enable them"**
 5. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
@@ -139,7 +141,7 @@ fork-sync-template/
 | 2 | [docs/02-setup.md](docs/02-setup.md) | 一次性配置 4 步 + 触发机制 | **第一次部署必看** |
 | 3 | [docs/03-api-flow.md](docs/03-api-flow.md) | 4 个核心 API + 5 阶段执行流程 | 想理解技术细节 |
 | 4 | [docs/04-backup-faq.md](docs/04-backup-faq.md) | 备份与回退 + 15 个 FAQ | 出问题查表 |
-| 5 | [docs/05-scenarios.md](docs/05-scenarios.md) | 10 个典型场景处理(新增上游删源码防护) | 遇到具体场景查表 |
+| 5 | [docs/05-scenarios.md](docs/05-scenarios.md) | 12 个典型场景处理(包含上游删源码防护和 fork workflow 分歧) | 遇到具体场景查表 |
 | 6 | [docs/06-multi-fork.md](docs/06-multi-fork.md) | 两种风格对比(动态发现 vs 静态 matrix) | 想理解两种风格的区别 |
 | 7 | [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md) | 怎么让某些 fork 不参与同步 | 有不想同步的 fork |
 | 8 | [docs/08-advanced.md](docs/08-advanced.md) | 网络重试、通知、reusable workflow | 想深度定制 |
@@ -168,6 +170,27 @@ fork-sync-template/
 - 组合填: `upstream_owner_filter=cv-cat` + `exclude_pattern=test` + `exclude_repos=legacy-thing` → 只同步 cv-cat 旗下、名字不含 test、且不是 legacy-thing 的 fork
 
 > 仓库自带的自动跳过(`.github/.no-sync` 文件)依然生效,跟上面这些筛选条件独立。详见 [docs/07-skip-mechanisms.md](docs/07-skip-mechanisms.md)。
+
+---
+
+## 禁用 fork workflows (可选)
+
+如果你的 fork 仓库只是托管镜像,不需要 fork 自己继续跑 CI / docs / release / deploy,可以让本项目在正式同步前先禁用目标 fork 里的 active workflows。这样可以避免 fork 内部的 `schedule` / `push` workflow 每隔几小时自动提交时间戳、构建产物或文档,导致 fork 和 upstream 反复进入 `diverged`。
+
+默认不开启。长期配置写到 `.github/sync-config.yml`:
+
+```yaml
+disable_fork_workflows: true
+disable_fork_workflows_repos: "all"
+disable_fork_workflows_keep_patterns: "ci.yml,release*"
+```
+
+- `disable_fork_workflows_repos: "all"` 表示本次发现并准备同步的全部 fork;也可以填 `repo-a,Link-Start/repo-b`。
+- `disable_fork_workflows_keep_patterns` 是白名单,匹配 workflow 名称、路径或文件名;留空表示命中的 fork 里 active workflows 全部禁用。
+- `dry_run: true` 或手动触发时选择 dry-run,会只列出“会禁用哪些 workflow”,不会真正禁用。
+- 这个功能操作的是目标 fork 仓库自己的 Actions workflows,不修改 upstream,也不影响同步逻辑本身。
+- 如果当前配置仓库本身也是 fork,`all` 不会默认禁用当前配置仓库自身;确实要禁用时需要显式写仓库名。
+- PAT 需要额外给目标 fork `Actions: Read and write`;普通同步只需要 `Contents: Read and write`。
 
 ---
 

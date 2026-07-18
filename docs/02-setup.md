@@ -69,6 +69,7 @@ env:
   DEFAULT_MAX_PARALLEL: '4'                # 并发数
   DEFAULT_SIZE_CHECK_EXEMPT: ''            # size 检查豁免 fork 名,逗号分隔
   DEFAULT_DISCARD_LOCAL_CHANGES: 'force'   # upstream 有新增且 fork 有本地提交时,备份后 Discard commits
+  DEFAULT_DISABLE_FORK_WORKFLOWS: 'false'  # 默认不禁用目标 fork workflows
 ```
 
 **方式 B: 用 `.github/sync-config.yml` 覆盖默认值**
@@ -83,6 +84,9 @@ size_check_exempt: ""
 max_parallel: 4
 sync_mode: auto
 discard_local_changes: force
+disable_fork_workflows: false
+disable_fork_workflows_repos: ""
+disable_fork_workflows_keep_patterns: ""
 webhook_type: slack
 ```
 
@@ -102,7 +106,7 @@ webhook_type: slack
 
 PAT 权限建议:
 
-- Fine-grained PAT: 选择配置仓库和所有目标 fork,给 `Contents: Read and write`;如果用 PR 模式,再给 `Pull requests: Read and write`;如果要写 issue 报告,给配置仓库 `Issues: Read and write`。
+- Fine-grained PAT: 选择配置仓库和所有目标 fork,给 `Contents: Read and write`;如果用 PR 模式,再给 `Pull requests: Read and write`;如果要写 issue 报告,给配置仓库 `Issues: Read and write`;如果启用同步前禁用 fork workflows,给目标 fork `Actions: Read and write`。
 - Classic PAT: 至少需要能读写目标 fork 的 `repo` 相关权限。
 
 workflow 里 `GH_TOKEN` 会优先用 `secrets.FORK_SYNC_TOKEN`,没配置时才回退到 `github.token`。

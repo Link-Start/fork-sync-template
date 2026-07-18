@@ -8,6 +8,7 @@
 |---|---|
 | `scripts/read-config.sh` | 读取 `.github/sync-config.yml`,把配置覆盖写入后续 workflow 环境 |
 | `scripts/discover-forks.sh` | 动态发现 fork,支持 `only_repos` 单仓库测试、多 owner、排除列表和 upstream 元数据补齐 |
+| `scripts/disable-fork-workflows.sh` | 可选同步前禁用目标 fork 的 GitHub Actions workflows,支持 dry-run 和白名单 |
 | `scripts/sync-each-fork.sh` | 并发同步编排、结构化事件日志、CSV/artifact 状态生成 |
 | `scripts/fork-worker.sh` | 单个 fork 的分支同步、备份、discard/merge、保护性 skip 主流程 |
 | `scripts/detect-drift.sh` | 连续失败 drift 检测、告警 issue、`workflow-state` 状态分支写回 |
@@ -62,6 +63,39 @@ UPSTREAM_DEFAULT=$(gh_api_with_retry gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REP
 ## 只同步一次,不每天跑
 
 把 `schedule` 段删掉,只留 `workflow_dispatch`,需要时手动触发。
+
+## 同步前禁用 fork 自己的 workflows
+
+如果目标 fork 只用来跟 upstream 保持镜像,一般不需要 fork 里的 `schedule`、`push`、docs 或 release workflow 继续自动运行。否则这些 workflow 可能在 fork 里自动提交文档时间戳、构建产物或版本文件,让 fork 相对 upstream 产生本地提交;下次同步时就会出现 `ahead` / `diverged`,并触发 `local-backup/*` 保护分支。
+
+长期配置示例:
+
+```yaml
+disable_fork_workflows: true
+disable_fork_workflows_repos: "all"
+disable_fork_workflows_keep_patterns: "ci.yml,release*"
+```
+
+关键行为:
+
+- 默认关闭,不影响通用用户的 CI / release / docs / deploy。
+- `disable_fork_workflows_repos: "all"` 表示本次发现并准备同步的全部 fork;也可以填 `repo-a,owner/repo-b` 精确控制。
+- `disable_fork_workflows_keep_patterns` 是白名单 glob,匹配 workflow 名称、`.github/workflows/*.yml` 路径或文件名。
+- workflow 会在 `Discover forks` 后、`Sync each fork` 前执行禁用动作,让 fork 内部自动化先停下来再同步。
+- 如果当前配置仓库本身也是 fork,`all` 不会默认禁用当前配置仓库自身;确实要禁用时需要显式写仓库名。
+- 全局 `dry_run: true` 时只列出会禁用的 workflow,不会调用 disable API。
+- 禁用失败会写入事件日志和 CSV,但不阻塞后续同步;这样权限不够时仍能完成普通 fork sync。
+
+权限要求:普通同步只需要目标 fork `Contents: Read and write`;启用这个功能还需要 PAT 对目标 fork 有 `Actions: Read and write`。workflow 文件本身也声明了 `actions: write`,用于当前 token 有权限时管理 workflows。
+
+单仓库 dry-run 示例:
+
+```yaml
+only_repos: "lanhu-mcp_dsphper"
+dry_run: true
+disable_fork_workflows_repos: "lanhu-mcp_dsphper"
+disable_fork_workflows_keep_patterns: ""
+```
 
 ## 同步前先跑测试
 

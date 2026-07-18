@@ -95,6 +95,14 @@ on:
         options:
           - 'true'
           - 'false'
+      disable_fork_workflows_repos:
+        description: '同步前禁用这些 fork 的 workflows,逗号分隔;all = 本次发现的全部 fork;留空 = 关闭'
+        required: false
+        default: ''
+      disable_fork_workflows_keep_patterns:
+        description: '禁用 workflow 白名单 glob,逗号分隔;匹配 workflow 名称、路径或文件名'
+        required: false
+        default: ''
       sync_mode:
         description: '同步模式 (auto = 自动同步;pr = 开 PR 让人审,只对 behind 状态有效)'
         required: false
@@ -127,6 +135,7 @@ on:
 
 # 显式声明需要写权限
 permissions:
+  actions: write
   contents: write
   issues: write
   pull-requests: write
@@ -172,6 +181,12 @@ jobs:
       DEFAULT_LEGACY_BACKUP_REPO: ''
       # 集中备份分支前缀。
       DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX: 'legacy'
+      # 同步前禁用目标 fork 的 workflows,默认关闭,避免影响通用 fork 的 CI/release/deploy。
+      DEFAULT_DISABLE_FORK_WORKFLOWS: 'false'
+      # all = 本次发现的全部 fork;也支持 repo 或 owner/repo 逗号分隔。
+      DEFAULT_DISABLE_FORK_WORKFLOWS_REPOS: ''
+      # 白名单 glob,匹配 workflow 名称、路径或文件名,例如 ci.yml,release*,.github/workflows/docs.yml。
+      DEFAULT_DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS: ''
     steps:
       - name: Checkout config repository
         uses: actions/checkout@v4
@@ -182,7 +197,9 @@ jobs:
       #            size_check_exempt / max_parallel / sync_mode / webhook_type /
       #            discard_local_changes / protected_skip_repos /
       #            backup_then_sync_repos / legacy_backup_repo /
-      #            legacy_backup_branch_prefix
+      #            legacy_backup_branch_prefix / disable_fork_workflows /
+      #            disable_fork_workflows_repos /
+      #            disable_fork_workflows_keep_patterns
       # =====================================================================
       - name: Read sync config
         id: read-config
@@ -209,7 +226,21 @@ jobs:
         run: scripts/discover-forks.sh
 
       # =====================================================================
-      # Step 2: 并发同步 fork (脚本化实现,避免 workflow YAML 继续膨胀)
+      # Step 2: 可选禁用 fork 内 workflows,避免 schedule/push 在目标 fork 里制造新提交。
+      # 默认关闭;正式启用前可以配合 dry_run=true 先看将禁用哪些 workflow。
+      # =====================================================================
+      - name: Disable fork workflows
+        env:
+          FORKS: ${{ steps.discover.outputs.forks }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIG_REPO: ${{ github.event.repository.name }}
+          DISABLE_FORK_WORKFLOWS: ${{ env.CONFIG_DISABLE_FORK_WORKFLOWS || env.DEFAULT_DISABLE_FORK_WORKFLOWS }}
+          DISABLE_FORK_WORKFLOWS_REPOS: ${{ inputs.disable_fork_workflows_repos || env.CONFIG_DISABLE_FORK_WORKFLOWS_REPOS || env.DEFAULT_DISABLE_FORK_WORKFLOWS_REPOS }}
+          DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS: ${{ inputs.disable_fork_workflows_keep_patterns || env.CONFIG_DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS || env.DEFAULT_DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS }}
+        run: scripts/disable-fork-workflows.sh
+
+      # =====================================================================
+      # Step 3: 并发同步 fork (脚本化实现,避免 workflow YAML 继续膨胀)
       # =====================================================================
       - name: Sync each fork
         env:
@@ -233,7 +264,7 @@ jobs:
         run: scripts/sync-each-fork.sh
 
       # =====================================================================
-      # Step 2.5: Drift 检测 (Item 15)
+      # Step 4: Drift 检测 (Item 15)
       # 读 workflow-state 分支上的 .drift-state.json(可能不存在)→ 合并本次结果 →
       # 连续 3 次 fail 的 fork 开 issue 告警 → 写回新 state
       # 跟 sync-config.yml 不同:.drift-state.json 是 workflow 自己管理的状态文件,
@@ -247,7 +278,7 @@ jobs:
         run: scripts/detect-drift.sh
 
       # =====================================================================
-      # Step 3: 汇总到 issue (跑完自动开/更新一个固定 issue 贴汇总)
+      # Step 5: 汇总到 issue (跑完自动开/更新一个固定 issue 贴汇总)
       # =====================================================================
       - name: Post issue summary
         if: always()
@@ -257,7 +288,7 @@ jobs:
         run: scripts/post-issue-summary.sh
 
       # =====================================================================
-      # Step 4: 发送 webhook 通知 (Slack / 钉钉 / 通用)
+      # Step 6: 发送 webhook 通知 (Slack / 钉钉 / 通用)
       # 推荐用 secrets.WEBHOOK_URL 存 URL,然后这里改成:
       #   WEBHOOK_URL: ${{ secrets.WEBHOOK_URL || inputs.webhook_url }}
       # webhook 失败不影响 workflow 整体结果

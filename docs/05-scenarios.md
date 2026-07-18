@@ -129,3 +129,38 @@ legacy_backup_branch_prefix: "legacy"
 `backup_then_sync_repos` 的安全门槛:当前指向库必须可访问、不是空库、没有体积暴减;统一备份仓库必须配置且备份校验成功。任一条件不满足,不会 Discard 原 fork。
 
 当前集中备份只备份 fork 默认分支,所以 `backup_then_sync_repos` 只会释放默认分支去对齐当前指向库;其他分支仍按普通同步规则处理。
+
+### 场景 12: fork 自己的 workflow 每隔几小时自动提交,导致反复 diverged
+
+典型表现:
+
+- 目标 fork 里有 `docs-sync.yml`、`release.yml`、`deploy.yml` 或类似 workflow
+- workflow 由 `schedule` 或 `push` 触发,会修改文档时间戳、构建产物、版本文件等
+- upstream 也有新提交时,compare 会变成 `diverged`,例如 `ahead_by=3`、`behind_by=3`
+- 本项目为了保护 fork 里的本地提交,会创建或复用 `local-backup/*`,时间久了看起来像“同步出了很多带时间戳的分支”
+
+如果这些 fork 只是镜像仓库,可以在正式同步前禁用 fork 自己的 workflows:
+
+```yaml
+disable_fork_workflows: true
+disable_fork_workflows_repos: "all"
+disable_fork_workflows_keep_patterns: ""
+```
+
+建议先 dry-run 单仓库验证:
+
+```yaml
+only_repos: "lanhu-mcp_dsphper"
+dry_run: true
+disable_fork_workflows_repos: "lanhu-mcp_dsphper"
+```
+
+如果你确实要保留某些 CI 或 release workflow,加白名单:
+
+```yaml
+disable_fork_workflows_keep_patterns: "ci.yml,release*"
+```
+
+这个功能只禁用目标 fork 的 Actions workflows,不会改 upstream。普通同步需要 `Contents: Read and write`;启用 workflow 禁用还需要 PAT 对目标 fork 有 `Actions: Read and write`。
+
+如果当前配置仓库本身也是 fork,`all` 不会默认禁用当前配置仓库自身,避免把负责同步的 workflow 停掉;确实要禁用时需要显式写仓库名。
