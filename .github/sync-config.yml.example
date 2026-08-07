@@ -45,6 +45,12 @@ disable_fork_workflows_repos: ""
 # 留空 = 不保留,命中目标 fork 时禁用所有 active workflows
 disable_fork_workflows_keep_patterns: ""
 
+# 已全量禁用 workflow 的 fork 在此天数内跳过重新探测 (缓存命中,节省 API 配额)
+# 超过 TTL 后强制重新探测,防止 fork 端手动调整策略未被感知
+# 新 fork 首次出现即强制探测,不受 TTL 限制;改 disable_fork_workflows_* 配置会强制全部重探测
+# 建议 7 / 14 / 30
+workflow_disable_ttl_days: 14
+
 # 上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,跳过 fork)
 # 0.10 = 敏感 (推荐)  0.30 = 宽松  0 = 关闭
 size_drop_threshold: 0.10

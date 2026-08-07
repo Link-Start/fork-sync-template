@@ -18,3 +18,7 @@ legacy_backup_branch_prefix: "legacy"
 disable_fork_workflows: true
 disable_fork_workflows_repos: "all"
 disable_fork_workflows_keep_patterns: ""
+
+# 已全量禁用 workflow 的 fork 在此天数内跳过重新探测;超过后强制重新探测。
+# 新 fork 首次出现即强制探测;改上面 disable_fork_workflows_* 配置会强制全部重探测。
+workflow_disable_ttl_days: 14

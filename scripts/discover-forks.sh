@@ -149,6 +149,38 @@ if [ -n "$ONLY_REPOS" ] && [ "$COUNT" -eq 0 ] && [ "$DISCOVERED_COUNT" -eq 0 ]; 
   exit 1
 fi
 
+# =====================================================================
+# 新 fork 识别 (Item 3): 读上次 workflow-disable-state.json 的 fork 集合
+#   - 当前发现的 fork 不在上次集合里 → 标记 is_new=true
+#   - 新 fork 排到末尾,由 disable 步骤强制重新探测,再进入同步
+#   - 状态文件由 disable-fork-workflows.sh 在每次 run 结束后写回
+# =====================================================================
+OLD_WD_STATE=""
+if [ -n "${CONFIG_REPO:-}" ]; then
+  OLD_WD_STATE=$(gh_api_with_retry "repos/$MY_OWNER/$CONFIG_REPO/contents/workflow-disable-state.json?ref=workflow-state" \
+                  --jq '.content // ""' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+fi
+if [ -n "$OLD_WD_STATE" ]; then
+  OLD_FORK_SET=$(echo "$OLD_WD_STATE" | jq -c '[.forks | keys[]]' 2>/dev/null || echo "[]")
+else
+  OLD_FORK_SET="[]"
+fi
+if [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ]; then
+  NEW_COUNT=$(echo "$FORKS" | jq --argjson oldset "$OLD_FORK_SET" \
+    '[.[] | select(.name as $n | ($oldset | index($n)) == null)] | length')
+  FORKS=$(echo "$FORKS" | jq --argjson oldset "$OLD_FORK_SET" '
+    map(. + {is_new: ((.name as $n | ($oldset | index($n)) == null))})
+    | sort_by(if .is_new then 1 else 0 end)
+  ')
+  if [ "${NEW_COUNT:-0}" -gt 0 ]; then
+    echo "🆕 新增 $NEW_COUNT 个 fork (上次未记录),已标记 is_new 并排到末尾,将强制探测:"
+    echo "$FORKS" | jq -r '.[] | select(.is_new) | "  - \(.fork_owner)/\(.name)"'
+  else
+    echo "✅ 无新增 fork,全部已记录过"
+  fi
+  COUNT=$(echo "$FORKS" | jq length)
+fi
+
 echo "forks<<EOF" >> "$GITHUB_OUTPUT"
 echo "$FORKS" >> "$GITHUB_OUTPUT"
 echo "EOF" >> "$GITHUB_OUTPUT"

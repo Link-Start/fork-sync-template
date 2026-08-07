@@ -187,6 +187,9 @@ jobs:
       DEFAULT_DISABLE_FORK_WORKFLOWS_REPOS: ''
       # 白名单 glob,匹配 workflow 名称、路径或文件名,例如 ci.yml,release*,.github/workflows/docs.yml。
       DEFAULT_DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS: ''
+      # 已全量禁用 workflow 的 fork 在此天数内跳过重新探测 (缓存命中);超过则强制重新探测。
+      # 新 fork 不在此限制,首次出现即强制探测。改 disable_fork_workflows_* 配置会强制全部重探测。
+      DEFAULT_WORKFLOW_DISABLE_TTL_DAYS: '14'
     steps:
       - name: Checkout config repository
         uses: actions/checkout@v4
@@ -212,6 +215,7 @@ jobs:
       - name: Discover forks
         id: discover
         env:
+          CONFIG_REPO: ${{ github.event.repository.name }}
           FILTER: ${{ inputs.upstream_owner_filter }}
           # 三段 fallback: input > config > default
           EXCLUDE_REPOS: ${{ inputs.exclude_repos || env.CONFIG_EXCLUDE_REPOS }}
@@ -237,6 +241,7 @@ jobs:
           DISABLE_FORK_WORKFLOWS: ${{ env.CONFIG_DISABLE_FORK_WORKFLOWS || env.DEFAULT_DISABLE_FORK_WORKFLOWS }}
           DISABLE_FORK_WORKFLOWS_REPOS: ${{ inputs.disable_fork_workflows_repos || env.CONFIG_DISABLE_FORK_WORKFLOWS_REPOS || env.DEFAULT_DISABLE_FORK_WORKFLOWS_REPOS }}
           DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS: ${{ inputs.disable_fork_workflows_keep_patterns || env.CONFIG_DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS || env.DEFAULT_DISABLE_FORK_WORKFLOWS_KEEP_PATTERNS }}
+          WORKFLOW_DISABLE_TTL_DAYS: ${{ env.CONFIG_WORKFLOW_DISABLE_TTL_DAYS || env.DEFAULT_WORKFLOW_DISABLE_TTL_DAYS }}
         run: scripts/disable-fork-workflows.sh
 
       # =====================================================================

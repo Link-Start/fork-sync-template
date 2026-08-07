@@ -87,6 +87,7 @@ discard_local_changes: force
 disable_fork_workflows: false
 disable_fork_workflows_repos: ""
 disable_fork_workflows_keep_patterns: ""
+workflow_disable_ttl_days: 14
 webhook_type: slack
 ```
 

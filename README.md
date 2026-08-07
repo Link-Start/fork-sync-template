@@ -187,6 +187,7 @@ disable_fork_workflows_keep_patterns: "ci.yml,release*"
 
 - `disable_fork_workflows_repos: "all"` 表示本次发现并准备同步的全部 fork;也可以填 `repo-a,Link-Start/repo-b`。
 - `disable_fork_workflows_keep_patterns` 是白名单,匹配 workflow 名称、路径或文件名;留空表示命中的 fork 里 active workflows 全部禁用。
+- `workflow_disable_ttl_days` (默认 14):已全量禁用的 fork 在此天数内**跳过重新探测** (缓存命中,省 API 配额);超过 TTL 强制重新探测。新 fork 首次出现即强制探测,不受 TTL 限制;改 `disable_fork_workflows_*` 配置会强制全部重探测。探测状态存 `workflow-state` 分支的 `workflow-disable-state.json`。
 - `dry_run: true` 或手动触发时选择 dry-run,会只列出“会禁用哪些 workflow”,不会真正禁用。
 - 这个功能操作的是目标 fork 仓库自己的 Actions workflows,不修改 upstream,也不影响同步逻辑本身。
 - 如果当前配置仓库本身也是 fork,`all` 不会默认禁用当前配置仓库自身;确实要禁用时需要显式写仓库名。

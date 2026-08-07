@@ -145,6 +145,7 @@ legacy_backup_branch_prefix: "legacy"
 disable_fork_workflows: true
 disable_fork_workflows_repos: "all"
 disable_fork_workflows_keep_patterns: ""
+workflow_disable_ttl_days: 14
 ```
 
 建议先 dry-run 单仓库验证:
