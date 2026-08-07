@@ -344,6 +344,11 @@ if [ -z "$DISABLE_FORK_WORKFLOWS_REPOS" ]; then
   exit 0
 fi
 
+# 大 JSON 通过文件传递 (env 单变量限 ~128KB,455 个 fork 会 Argument list too long)
+if [ -n "${FORKS_FILE:-}" ] && [ -f "$FORKS_FILE" ] && [ -z "${FORKS:-}" ]; then
+  FORKS=$(cat "$FORKS_FILE")
+fi
+
 if ! echo "${FORKS:-}" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "::error::Discover forks 输出不是 JSON array,无法禁用 fork workflows"
   exit 1

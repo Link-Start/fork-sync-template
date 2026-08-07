@@ -261,7 +261,7 @@ jobs:
       # =====================================================================
       - name: Disable fork workflows
         env:
-          FORKS: ${{ steps.discover.outputs.forks }}
+          FORKS_FILE: ${{ runner.temp }}/forks.json
           DRY_RUN: ${{ inputs.dry_run }}
           CONFIG_REPO: ${{ github.event.repository.name }}
           DISABLE_FORK_WORKFLOWS: ${{ env.CONFIG_DISABLE_FORK_WORKFLOWS || env.DEFAULT_DISABLE_FORK_WORKFLOWS }}
@@ -275,7 +275,7 @@ jobs:
       # =====================================================================
       - name: Sync each fork
         env:
-          FORKS: ${{ steps.discover.outputs.forks }}
+          FORKS_FILE: ${{ runner.temp }}/forks.json
           MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
           SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.CONFIG_SIZE_DROP_THRESHOLD || env.DEFAULT_SIZE_DROP_THRESHOLD }}
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}

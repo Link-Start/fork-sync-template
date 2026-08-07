@@ -16,6 +16,11 @@ trap 'rm -rf "$LOG_DIR"' EXIT
 : >> "$RUNNER_TEMP/events.jsonl"
 : > "$RUNNER_TEMP/summary.jsonl"
 
+# 大 JSON 通过文件传递 (env 单变量限 ~128KB,455 个 fork 会 Argument list too long)
+if [ -n "${FORKS_FILE:-}" ] && [ -f "$FORKS_FILE" ] && [ -z "${FORKS:-}" ]; then
+  FORKS=$(cat "$FORKS_FILE")
+fi
+
 if ! echo "$FORKS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "::error::Discover forks 输出不是 JSON array"
   exit 1

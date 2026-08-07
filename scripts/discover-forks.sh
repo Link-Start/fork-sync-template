@@ -185,6 +185,9 @@ echo "forks<<EOF" >> "$GITHUB_OUTPUT"
 echo "$FORKS" >> "$GITHUB_OUTPUT"
 echo "EOF" >> "$GITHUB_OUTPUT"
 
+# 大 JSON 不通过 env 传 (Linux 单环境变量限 ~128KB,455 个 fork 会超),落盘共享
+echo "$FORKS" > "$RUNNER_TEMP/forks.json"
+
 if [ "$COUNT" -eq 0 ]; then
   if [ -n "$ONLY_REPOS" ] && [ "$DISCOVERED_COUNT" -gt 0 ]; then
     echo "⏭️  only_repos 匹配到 $DISCOVERED_COUNT 个 fork,但已被过滤/排除条件跳过: $ONLY_REPOS"
