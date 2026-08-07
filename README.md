@@ -193,6 +193,19 @@ disable_fork_workflows_keep_patterns: "ci.yml,release*"
 - 如果当前配置仓库本身也是 fork,`all` 不会默认禁用当前配置仓库自身;确实要禁用时需要显式写仓库名。
 - PAT 需要额外给目标 fork `Actions: Read and write`;普通同步只需要 `Contents: Read and write`。
 
+### ⚡ 分批同步 (配额护栏)
+
+单次全量同步 455 个 fork 约需 5000 次 API 调用,恰好顶满 GitHub 每小时配额。workflow 内置配额护栏自动分批:
+
+```yaml
+sync_batch_size: 15            # 每批 fork 数 (约 10 次调用/个)
+sync_rate_safe_threshold: 300  # 剩余配额安全线,低于则提前结束本 run
+```
+
+- 每批跑完查剩余配额,低于安全线就**优雅结束,不失败、不 sleep 跨窗口**;剩余 fork 下次 run 自动补上 (幂等,已同步的显示 `identical` 跳过)。
+- 不跨窗口等待是为了不烧 GitHub Actions 免费分钟数 (2000/月);每天一次 run、每批不超限更划算。
+- 新 fork 自动排到批次尾部;配额紧张时调小 `sync_batch_size`。
+
 ---
 
 ## 🌿 分支数量保护

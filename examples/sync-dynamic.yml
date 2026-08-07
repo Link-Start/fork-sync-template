@@ -190,6 +190,11 @@ jobs:
       # 已全量禁用 workflow 的 fork 在此天数内跳过重新探测 (缓存命中);超过则强制重新探测。
       # 新 fork 不在此限制,首次出现即强制探测。改 disable_fork_workflows_* 配置会强制全部重探测。
       DEFAULT_WORKFLOW_DISABLE_TTL_DAYS: '14'
+      # 方案4 分批同步:每批处理的 fork 数 (约 10 次 API 调用/个,批次内不超限)。
+      # 每批跑完检查剩余配额,低于安全线则提前结束,剩余 fork 下次 run 自动补上 (幂等)。
+      DEFAULT_SYNC_BATCH_SIZE: '15'
+      # 剩余配额安全线,低于此值停止本批之后的处理 (给 detect-drift/summary 等下游留配额)。
+      DEFAULT_SYNC_RATE_SAFE_THRESHOLD: '300'
     steps:
       - name: Checkout config repository
         uses: actions/checkout@v4
@@ -265,6 +270,8 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
           CONFIG_REPO: ${{ github.event.repository.name }}
+          SYNC_BATCH_SIZE: ${{ env.CONFIG_SYNC_BATCH_SIZE || env.DEFAULT_SYNC_BATCH_SIZE || '15' }}
+          SYNC_RATE_SAFE_THRESHOLD: ${{ env.CONFIG_SYNC_RATE_SAFE_THRESHOLD || env.DEFAULT_SYNC_RATE_SAFE_THRESHOLD || '300' }}
           DISCARD_LOCAL_CHANGES: ${{ inputs.discard_local_changes || env.CONFIG_DISCARD_LOCAL_CHANGES || env.DEFAULT_DISCARD_LOCAL_CHANGES }}
         run: scripts/sync-each-fork.sh
 

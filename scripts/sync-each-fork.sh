@@ -73,6 +73,19 @@ export MY_OWNER CONFIG_REPO SIZE_DROP_THRESHOLD SIZE_CHECK_EXEMPT LOG_DIR SYNC_M
 export MAX_BRANCHES_PER_FORK SKIP_BRANCH_PATTERNS FULL_BRANCH_SYNC_REPOS BRANCH_LIMIT_GROUPS BRANCH_LIMIT_OVERRIDES
 export PROTECTED_SKIP_REPOS BACKUP_THEN_SYNC_REPOS LEGACY_BACKUP_REPO LEGACY_BACKUP_BRANCH_PREFIX DRY_RUN
 
+# 配额护栏参数 (方案4: 分批同步,每批达到限流极限又不超)
+#   SYNC_BATCH_SIZE           每批处理的 fork 数 (默认 15,约 150 次 API 调用/批)
+#   SYNC_RATE_SAFE_THRESHOLD  剩余配额安全线,低于此值停止本次,剩余 fork 下次 run 补上
+#                             避免跨窗口 sleep 等待烧掉 GitHub Actions 分钟数
+if ! printf '%s' "${SYNC_BATCH_SIZE:-15}" | grep -Eq '^[1-9][0-9]*$'; then
+  echo "::warning::sync_batch_size='${SYNC_BATCH_SIZE:-}' 非法,回退到 15"
+  SYNC_BATCH_SIZE=15
+fi
+if ! printf '%s' "${SYNC_RATE_SAFE_THRESHOLD:-300}" | grep -Eq '^[1-9][0-9]*$'; then
+  echo "::warning::sync_rate_safe_threshold='${SYNC_RATE_SAFE_THRESHOLD:-}' 非法,回退到 300"
+  SYNC_RATE_SAFE_THRESHOLD=300
+fi
+
 # API 限流检查:剩余配额 = 0 时睡到 reset
 # 一次只查一次 (在 xargs 启动前),各 fork 不再重复查
 check_rate_limit() {
@@ -98,8 +111,41 @@ check_rate_limit() {
 }
 check_rate_limit
 
-# 并发跑 (MAX_PARALLEL 个同时),用 base64 传递 JSON 避免 shell/xargs 吃掉引号
-echo "$FORKS" | jq -r '.[] | @base64' | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$1"' _ {}
+# 读取剩余配额 (rate_limit 端点不消耗配额)
+get_remaining() {
+  gh_api_with_retry "rate_limit" --jq '.resources.core.remaining // 9999' 2>/dev/null || echo 9999
+}
+
+# 分批并发处理:每批之间检查配额,低于安全线则优雅停止 (方案4)
+# 已处理的 fork 幂等 (下次 run compare 结果为 identical 即跳过),无需跨 run 状态
+echo "🧩 分批同步: 每批 $SYNC_BATCH_SIZE 个,安全线 $SYNC_RATE_SAFE_THRESHOLD 配额"
+FORK_B64=()
+while IFS= read -r line; do
+  FORK_B64+=("$line")
+done < <(echo "$FORKS" | jq -r '.[] | @base64')
+TOTAL_FORKS=${#FORK_B64[@]}
+PROCESSED=0
+QUOTA_STOPPED=false
+
+while [ "$PROCESSED" -lt "$TOTAL_FORKS" ]; do
+  BATCH_END=$((PROCESSED + SYNC_BATCH_SIZE))
+  [ "$BATCH_END" -gt "$TOTAL_FORKS" ] && BATCH_END=$TOTAL_FORKS
+  for i in $(seq $((PROCESSED + 1)) "$BATCH_END"); do
+    printf '%s\n' "${FORK_B64[$((i - 1))]}"
+  done | xargs -r -P "$MAX_PARALLEL" -I {} bash -c 'process_fork "$1"' _ {} \
+    || echo "⚠️ 本批次部分 fork worker 非零退出 (失败已记录到事件日志,不中断)"
+  PROCESSED=$BATCH_END
+
+  if [ "$PROCESSED" -lt "$TOTAL_FORKS" ]; then
+    remaining=$(get_remaining)
+    echo "📊 批次进度: $PROCESSED/$TOTAL_FORKS,剩余配额 $remaining"
+    if [ "$remaining" -lt "$SYNC_RATE_SAFE_THRESHOLD" ]; then
+      echo "⏸️  剩余配额 $remaining < 安全线 $SYNC_RATE_SAFE_THRESHOLD,剩余 $((TOTAL_FORKS - PROCESSED)) 个 fork 留待下次 run 同步"
+      QUOTA_STOPPED=true
+      break
+    fi
+  fi
+done
 
 # 按原始 fork 顺序输出所有 log
 echo "$FORKS" | jq -r '.[].name' | while read -r name; do
@@ -110,7 +156,11 @@ done
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ 全部 fork 处理完毕 (并发 $MAX_PARALLEL)"
+if [ "$QUOTA_STOPPED" = "true" ]; then
+  echo "⏸️  本次处理 $PROCESSED/$TOTAL_FORKS 个 fork (剩余配额不足,提前停止)"
+else
+  echo "✅ 全部 $TOTAL_FORKS 个 fork 处理完毕 (并发 $MAX_PARALLEL)"
+fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # 把结构化 events 输出到主 log (Item 11),方便不下载 artifact 也能看到
@@ -169,7 +219,11 @@ else
 fi
 
 TOTAL_FAILED=$(jq -s '[.[].failed] | add // 0' "$RUNNER_TEMP/summary.jsonl" 2>/dev/null || echo 0)
-if [ "$TOTAL_FAILED" -gt 0 ]; then
+if [ "$TOTAL_FAILED" -gt 0 ] && [ "$QUOTA_STOPPED" != "true" ]; then
   echo "::error::本次同步存在 $TOTAL_FAILED 个分支失败"
   exit 1
+fi
+if [ "$QUOTA_STOPPED" = "true" ]; then
+  echo "ℹ️  因配额不足提前停止,剩余 fork 下次 run 自动补上,本次不算失败"
+  exit 0
 fi

@@ -100,6 +100,24 @@ disable_fork_workflows_repos: "lanhu-mcp_dsphper"
 disable_fork_workflows_keep_patterns: ""
 ```
 
+## 分批同步,避免打爆 API 配额
+
+单次全量同步 455 个 fork 需要约 5000 次 API 调用,恰好顶满 GitHub 每小时配额 (5000),稍有波动就撞限流。workflow 内置**配额护栏**自动分批:
+
+```yaml
+# 每批处理的 fork 数 (约 10 次 API 调用/个,批次内不超限)
+sync_batch_size: 15
+# 剩余配额安全线:每批跑完检查剩余配额,低于此值提前结束本 run
+# 剩余 fork 下次 run 自动补上 (幂等,已同步的显示 identical 直接跳过)
+sync_rate_safe_threshold: 300
+```
+
+- 每批跑完用 `rate_limit` 端点 (不消耗配额) 检查剩余量,低于 `sync_rate_safe_threshold` 就优雅结束,**不失败、不 sleep 跨窗口**。
+- 已同步的 fork 下次 run 显示 `identical` 跳过,所以分批是幂等的,不需要跨 run 进度状态。
+- 不跨窗口等待的原因:单 run 睡到下一小时窗口会把单次 Actions 运行拖到 5-6 小时,免费额度 (2000 分钟/月) 撑不住;每天一次 run、每次处理一批更划算。
+- 新 fork 自动排到批次尾部 (discover 阶段标 `is_new`),首批同步旧 fork。
+- 配额紧张时调小 `sync_batch_size`、调大 `sync_rate_safe_threshold`。
+
 ## 同步前先跑测试
 
 加一个 `test` job 在 `sync` job 之前,`sync` 加 `needs: test`:

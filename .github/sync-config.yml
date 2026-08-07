@@ -22,3 +22,8 @@ disable_fork_workflows_keep_patterns: ""
 # 已全量禁用 workflow 的 fork 在此天数内跳过重新探测;超过后强制重新探测。
 # 新 fork 首次出现即强制探测;改上面 disable_fork_workflows_* 配置会强制全部重探测。
 workflow_disable_ttl_days: 14
+
+# 方案4 分批同步:每批处理的 fork 数;每批跑完检查剩余配额,
+# 低于 sync_rate_safe_threshold 则提前结束,剩余 fork 下次 run 自动补上 (幂等)。
+sync_batch_size: 15
+sync_rate_safe_threshold: 300

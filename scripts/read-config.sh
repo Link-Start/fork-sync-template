@@ -26,7 +26,7 @@ for KEY in exclude_pattern exclude_repos size_drop_threshold size_check_exempt \
            discard_local_changes protected_skip_repos backup_then_sync_repos \
            legacy_backup_repo legacy_backup_branch_prefix disable_fork_workflows \
            disable_fork_workflows_repos disable_fork_workflows_keep_patterns \
-           workflow_disable_ttl_days; do
+           workflow_disable_ttl_days sync_batch_size sync_rate_safe_threshold; do
   VAL=$(echo "$CONFIG_YAML" | grep -E "^${KEY}:" | head -1 \
         | sed -E "s/^${KEY}:[[:space:]]*//" \
         | sed 's/^["'"'"']//;s/["'"'"']$//' || echo "")
