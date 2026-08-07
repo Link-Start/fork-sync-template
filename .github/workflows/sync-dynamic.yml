@@ -236,7 +236,6 @@ jobs:
       - name: Discover forks
         id: discover
         env:
-          CONFIG_REPO: ${{ github.event.repository.name }}
           FILTER: ${{ inputs.upstream_owner_filter }}
           # 三段 fallback: input > config file > env default
           EXCLUDE_PATTERN: ${{ inputs.exclude_pattern || env.CONFIG_EXCLUDE_PATTERN || env.DEFAULT_EXCLUDE_PATTERN }}
