@@ -2,6 +2,19 @@
 
 > **17 项优化全部完成** (2026-06-04),按价值/风险分 4 个 Wave 实施。
 > 每个 item 一个 commit,粒度清晰,独立可回退。
+> **后续新增**:三阶段模型 (2026-08,见下方 [三阶段模型](#三阶段模型))。
+
+---
+
+## 三阶段模型
+
+在 17 项之外新增的重构,目标是**省 API 配额**:
+
+- **阶段1 检测** (`check-updates.sh`,每天 8 点): 轻量 diff 识别新 fork;对候选 fork 用 compare 检测更新;有更新的按批写入注册表 `pending_batches`。
+- **阶段2 同步** (`sync-each-fork.sh`,每天 9 点): 只消费注册表批次,逐批并发同步,每批查配额。
+- **阶段3 重试** (`retry-failed.sh`,每天 20 点): 重试 `retry_failed` 列表,连续失败达阈值进入告警。
+
+状态持久化在 `workflow-state` 分支的 `fork-registry.json` (syncable / unsyncable / new / retry_failed / pending_batches)。详见 [01-architecture.md](01-architecture.md) 与 [03-api-flow.md](03-api-flow.md)。
 
 ---
 
@@ -275,10 +288,11 @@
 
 如果以后想再加东西,以下是一些候选方向:
 
-- **per-fork 失败重试** — 单个 fork 失败自动重试 N 次 (目前重试是 per-API-call,不是 per-fork)
 - **sync dashboard** — 写个静态 HTML page 展示 sync 状态历史
 - **multi-repo 模板支持** — 一个 workflow 跑多个配置 (现在是单 repo)
 - **Slack interactive button** — 失败 issue 加 "立即回滚" / "跳过这次" 按钮
 - **更细粒度 webhook** — 按成功/失败/fail 数 阈值发不同级别通知
+
+> 注: per-fork 失败重试 (原来在候选列表) 已通过三阶段模型的阶段3 `retry-failed.sh` 实现。
 
 **怎么贡献**:在 GitHub issues 提,讨论后加进这份路线图。

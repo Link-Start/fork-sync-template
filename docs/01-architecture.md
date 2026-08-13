@@ -128,8 +128,12 @@ fork-sync-template/
 │   └── sync-static.yml               # 通用模板: 静态 matrix 版 (要手写 fork 列表)
 ├── scripts/                           # 动态 workflow 运行脚本和 helper
 │   ├── read-config.sh                 # 读取 .github/sync-config.yml 覆盖配置
+│   ├── fork-registry.sh               # 注册表读写 (workflow-state 分支的 fork-registry.json)
+│   ├── check-updates.sh               # 阶段1: 检测有更新的 fork 并分批写入注册表
+│   ├── prepare-sync-list.sh           # 阶段2: 把 pending_batches 展开成 forks.json
+│   ├── sync-each-fork.sh              # 阶段2: 并发同步 (消费注册表批次)
+│   ├── retry-failed.sh                # 阶段3: 重试多次失败列表 (retry_failed)
 │   ├── discover-forks.sh              # 动态发现 fork 并补齐 upstream 元数据
-│   ├── sync-each-fork.sh              # 并发同步编排
 │   ├── fork-worker.sh                 # 单 fork 同步主流程
 │   ├── detect-drift.sh                # 连续失败 drift 检测和状态写回
 │   ├── post-issue-summary.sh          # 同步结果 issue 汇总

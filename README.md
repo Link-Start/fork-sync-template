@@ -12,6 +12,8 @@
 **核心特性**:
 - ✅ 纯 GitHub REST API,只 checkout 配置仓库脚本,不 checkout 目标 fork、不 git push
 - ✅ 动态发现模式,自动列出你名下所有 fork
+- ✅ **三阶段模型**:每天 8 点检测有更新的 fork 并分批、9 点按批同步、20 点重试多次失败
+- ✅ **注册表持久化**:fork 状态存 `workflow-state` 分支,分批同步不依赖 discover/compare 全量重跑,省配额
 - ✅ 支持名称/owner 模式排除(自动跳过指定 fork)
 - ✅ 自动检测 fork 的"超前/落后"状态
 - ✅ 支持所有分支同步 (不只默认分支)
@@ -41,9 +43,13 @@ fork-sync-template/
 │   └── sync-static.yml               # 通用静态 matrix (需要手写 fork 列表)
 ├── scripts/                           # 动态 workflow 运行脚本和 helper
 │   ├── read-config.sh                 # 读取 .github/sync-config.yml 覆盖配置
+│   ├── fork-registry.sh               # 注册表读写 (workflow-state 分支的 fork-registry.json)
+│   ├── check-updates.sh               # 阶段1: 检测有更新的 fork 并分批写入注册表
+│   ├── prepare-sync-list.sh           # 阶段2: 把 pending_batches 展开成 forks.json
+│   ├── sync-each-fork.sh              # 阶段2: 并发同步 (消费注册表批次)
+│   ├── retry-failed.sh                # 阶段3: 重试多次失败列表 (retry_failed)
 │   ├── discover-forks.sh              # 动态发现 fork 并补齐 upstream 元数据
 │   ├── disable-fork-workflows.sh      # 可选:同步前禁用目标 fork 的 Actions workflows
-│   ├── sync-each-fork.sh              # 并发同步编排
 │   ├── fork-worker.sh                 # 单 fork 同步主流程
 │   ├── detect-drift.sh                # 连续失败 drift 检测和状态写回
 │   ├── post-issue-summary.sh          # 同步结果 issue 汇总
@@ -78,7 +84,7 @@ fork-sync-template/
 2. **配置跨仓库 token**: 在配置仓库 Settings → Secrets and variables → Actions 新增 `FORK_SYNC_TOKEN`,值用你自己的 PAT。普通同步至少给目标 fork 仓库 `Contents: Read and write`;如果启用“同步前禁用 fork workflows”,还要给目标 fork `Actions: Read and write`。
 3. **开 workflow 写权限**: 进你 fork 后的仓库 → Settings → Actions → General → Workflow permissions → 选 **Read and write permissions** → Save
 4. **开定时任务**: 进 Actions 标签页 → 看到黄色提示 "Workflows aren't being run on this forked repository" → 点 **"I understand my workflows, go ahead and enable them"**
-5. **完事。** `sync-dynamic.yml` 会自动跑,扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
+5. **完事。** 每天自动按三阶段跑 (见下方「三阶段模型」),扫描你名下所有 fork,**自动跳过名称含 "claude" 的 fork**,逐个同步其他。
 
 **想改排除的关键词?** 编辑 `.github/workflows/sync-dynamic.yml` 里的 `DEFAULT_EXCLUDE_PATTERN: 'claude'`,改其他词或留空。
 
@@ -116,6 +122,33 @@ fork-sync-template/
 
 ---
 
+## 🔄 三阶段模型 (每天自动跑)
+
+整个同步被拆成三个独立的定时阶段,通过 `workflow-state` 分支上的 `fork-registry.json` 注册表串联。核心思路:**检测只针对"有更新的 fork"做 compare,同步只处理这批 fork**,不再每次全量 discover 455 个 + 全量 compare,大幅节省 API 配额。
+
+| 阶段 | 北京时间 | 干什么 | 脚本 |
+|---|---|---|---|
+| 1. 检测 | 08:00 | 轻量识别新 fork;对已有 fork 用 `compare` 检测是否有更新;有更新的按批写入注册表 `pending_batches` | `check-updates.sh` |
+| 2. 同步 | 09:00 | 消费注册表批次,并发同步有更新的 fork;每批后查配额;失败的在 run 末尾重试一次 | `sync-each-fork.sh` |
+| 3. 重试 | 20:00 | 重试仍失败的 fork (注册表 `retry_failed`);连续失败达阈值进入告警列表 | `retry-failed.sh` |
+
+**注册表 (`workflow-state` 分支 / `fork-registry.json`)** 记录每个 fork 的归类:
+
+- `syncable` — 正常可同步的 fork
+- `unsyncable` — 上游不可访问/异常,跳过同步
+- `new` — 新发现的 fork,首次同步成功后才移入 `syncable`
+- `retry_failed` — 多次同步失败的 fork (带失败次数)
+- `pending_batches` — 阶段1 检测出的待同步批次
+
+**节省配额的三个关键点**:
+1. **14 天全量重检一次** (`full_check_interval_days`):只有全量重检才扫描所有 fork 并逐个补齐 upstream 元数据;其余每天只做轻量 diff + 对新 fork 单独 enrich。
+2. **阶段1 只 compare 需要检测的 fork**,发现"有更新"才进批次;`syncable` 里的 fork 同步完就不再碰,直到下次 14 天重检或上游再有更新。
+3. **阶段2 只同步批次里的 fork**;批次内每批查配额,低于安全线提前结束,剩余批次下次 run 自动补上。
+
+手动触发 (`workflow_dispatch`) 会按顺序跑完三个阶段,方便测试。
+
+---
+
 ## 两种风格的差异 (动态 vs 静态)
 
 | 维度 | 动态发现 (sync-dynamic) | 静态 matrix (sync-static) |
@@ -139,7 +172,7 @@ fork-sync-template/
 |---|---|---|---|
 | 1 | [docs/01-architecture.md](docs/01-architecture.md) | 为什么用独立配置仓库(鸡生蛋问题) | 想理解架构设计 |
 | 2 | [docs/02-setup.md](docs/02-setup.md) | 一次性配置 4 步 + 触发机制 | **第一次部署必看** |
-| 3 | [docs/03-api-flow.md](docs/03-api-flow.md) | 4 个核心 API + 5 阶段执行流程 | 想理解技术细节 |
+| 3 | [docs/03-api-flow.md](docs/03-api-flow.md) | 核心 API + 三阶段模型 + 单 fork 5 阶段流程 | 想理解技术细节 |
 | 4 | [docs/04-backup-faq.md](docs/04-backup-faq.md) | 备份与回退 + 15 个 FAQ | 出问题查表 |
 | 5 | [docs/05-scenarios.md](docs/05-scenarios.md) | 12 个典型场景处理(包含上游删源码防护和 fork workflow 分歧) | 遇到具体场景查表 |
 | 6 | [docs/06-multi-fork.md](docs/06-multi-fork.md) | 两种风格对比(动态发现 vs 静态 matrix) | 想理解两种风格的区别 |
@@ -195,16 +228,19 @@ disable_fork_workflows_keep_patterns: "ci.yml,release*"
 
 ### ⚡ 分批同步 (配额护栏)
 
-单次全量同步 455 个 fork 约需 5000 次 API 调用,恰好顶满 GitHub 每小时配额。workflow 内置配额护栏自动分批:
+单次全量同步 455 个 fork 约需 5000 次 API 调用,恰好顶满 GitHub 每小时配额。三阶段模型把"检测"和"同步"拆开,**阶段1 只 compare 有变化候选的 fork,阶段2 只同步批次里的 fork**,再配合批次内配额护栏:
 
 ```yaml
 sync_batch_size: 15            # 每批 fork 数 (约 10 次调用/个)
 sync_rate_safe_threshold: 300  # 剩余配额安全线,低于则提前结束本 run
+compare_batch_size: 100        # 阶段1 检测时每批 fork 数,批间查配额
+full_check_interval_days: 14   # 每 N 天全量重检一次可同步/不可同步列表
 ```
 
-- 每批跑完查剩余配额,低于安全线就**优雅结束,不失败、不 sleep 跨窗口**;剩余 fork 下次 run 自动补上 (幂等,已同步的显示 `identical` 跳过)。
-- 不跨窗口等待是为了不烧 GitHub Actions 免费分钟数 (2000/月);每天一次 run、每批不超限更划算。
-- 新 fork 自动排到批次尾部;配额紧张时调小 `sync_batch_size`。
+- 每批跑完查剩余配额,低于安全线就**优雅结束,不失败、不 sleep 跨窗口**;剩余批次存注册表 `pending_batches`,下次 run 自动补上 (幂等)。
+- 不跨窗口等待是为了不烧 GitHub Actions 免费分钟数 (2000/月);每天三次 run (8/9/20 点)、每批不超限更划算。
+- 新 fork 自动排到批次尾部 (阶段1 标 `is_new`),首批同步旧 fork。
+- 配额紧张时调小 `sync_batch_size` / `compare_batch_size`,调大 `sync_rate_safe_threshold` / `full_check_interval_days`。
 
 ---
 

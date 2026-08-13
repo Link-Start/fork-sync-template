@@ -88,6 +88,11 @@ disable_fork_workflows: false
 disable_fork_workflows_repos: ""
 disable_fork_workflows_keep_patterns: ""
 workflow_disable_ttl_days: 14
+sync_batch_size: 15
+sync_rate_safe_threshold: 300
+full_check_interval_days: 14   # 每 N 天全量重检一次可同步/不可同步列表
+compare_batch_size: 100        # 阶段1 检测更新时分批,批间查配额
+retry_alert_threshold: 3       # 连续失败达到此次数后进入告警列表
 webhook_type: slack
 ```
 
@@ -134,11 +139,22 @@ workflow 里 `GH_TOKEN` 会优先用 `secrets.FORK_SYNC_TOKEN`,没配置时才�
 2. 左侧选 "Sync My Forks (Exclude Claude)"
 3. 右侧点 "Run workflow" → 绿色按钮
 4. 等 10-20 秒,展开运行记录看日志
-5. **预期成功日志长这样**:
+5. **预期成功日志长这样** (阶段2 同步时的单 fork 处理日志;手动触发会依次跑完阶段1 检测 → 阶段2 同步):
    ```
+   📋 已加载注册表: 150 个可同步, 5 个不可同步, 2 个新 fork
+   🔍 检测 3 个 fork 是否有更新 (compare, 每批 100 个)
+     ⏳ Link-Start/repo-a: diverged (落后 5 个提交)
+   🎯 有更新待同步: 2 个
+   📦 已分 1 批 (每批 15 个):
+     批次 1: repo-a, repo-b
+   📝 workflow-state/fork-registry.json 已更新
+
+   🧩 待同步 2 个 fork, 1 批
+   ━━━ 批次 1/1: 2 个 fork ━━━
+     - Link-Start/repo-a
+     - Link-Start/repo-b
    🔍 上游默认分支: master
    💾 备份当前 fork: backup/20260602-153045-abc1234 → abc1234
-   ━━━ 同步分支: master ━━━
    ⏪ 落后 47 → merge-upstream 快进成功
    📊 同步结果
      🆕 新建分支: 0
@@ -152,12 +168,18 @@ workflow 里 `GH_TOKEN` 会优先用 `secrets.FORK_SYNC_TOKEN`,没配置时才�
 
 ### 自动定时
 
+三阶段模型拆成三个独立的定时 cron (UTC 时区):
+
 ```yaml
 schedule:
-  - cron: '0 0 * * *'
+  - cron: '0 0 * * *'    # 阶段1 检测: UTC 00:00 (北京 08:00)
+  - cron: '0 1 * * *'    # 阶段2 同步: UTC 01:00 (北京 09:00)
+  - cron: '0 12 * * *'   # 阶段3 重试: UTC 12:00 (北京 20:00)
 ```
 
-- 每天 **UTC 00:00** 跑 (即 **北京时间 08:00**)
+- **阶段1 (08:00)**: 检测有更新的 fork,分批写入注册表 `pending_batches`
+- **阶段2 (09:00)**: 按批并发同步有更新的 fork;每批后查配额,低于安全线提前结束,剩余下次 run 补上
+- **阶段3 (20:00)**: 重试多次失败的 fork;连续失败达阈值进入告警列表
 - cron 格式: `分 时 日 月 周`,**注意是 UTC 时区**
 - GitHub 定时任务有 5-30 分钟误差,不一定精确到分
 

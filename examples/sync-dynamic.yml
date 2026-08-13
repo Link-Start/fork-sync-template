@@ -24,14 +24,15 @@
 name: Sync All My Forks (Auto Discover, Generic)
 
 on:
-  # 改频率:把下面 3 行取消注释你想用的,注释掉不用的 (cron 是 UTC 时间)
-  #   '0 0 * * *'    = 每天 00:00 UTC (北京时间 08:00) — 默认
-  #   '0 */6 * * *'  = 每 6 小时 (00, 06, 12, 18 UTC)
-  #   '0 0 * * 1'    = 每周一 00:00 UTC (北京时间周一 08:00)
+  # 三阶段模型 (cron 是 UTC 时间, 北京 = UTC+8):
+  #   0 0  * * *  = 每天 08:00 北京  阶段1: 检测有更新的 fork 并分批 (写入注册表)
+  #   0 1  * * *  = 每天 09:00 北京  阶段2: 按批次同步 (消费注册表 pending_batches)
+  #   0 12 * * *  = 每天 20:00 北京  阶段3: 重试多次失败的 fork
+  # 若不需要三阶段,可注释掉多余行;阶段1/2 是配套的,建议保留
   schedule:
     - cron: '0 0 * * *'
-    # - cron: '0 */6 * * *'
-    # - cron: '0 0 * * 1'
+    - cron: '0 1 * * *'
+    - cron: '0 12 * * *'
   # 允许 Actions 标签页手动触发
   workflow_dispatch:
     inputs:
@@ -195,6 +196,13 @@ jobs:
       DEFAULT_SYNC_BATCH_SIZE: '15'
       # 剩余配额安全线,低于此值停止本批之后的处理 (给 detect-drift/summary 等下游留配额)。
       DEFAULT_SYNC_RATE_SAFE_THRESHOLD: '300'
+      # 三阶段模型:
+      #   full_check_interval_days = 14  每 N 天全量重检可同步/不可同步列表 (阶段1)
+      #   compare_batch_size       = 100 阶段1 检测更新时分批,批间查配额
+      #   retry_alert_threshold    = 3   连续失败达到此次数后进入告警列表
+      DEFAULT_FULL_CHECK_INTERVAL_DAYS: '14'
+      DEFAULT_COMPARE_BATCH_SIZE: '100'
+      DEFAULT_RETRY_ALERT_THRESHOLD: '3'
     steps:
       - name: Checkout config repository
         uses: actions/checkout@v4
@@ -235,10 +243,43 @@ jobs:
         run: scripts/discover-forks.sh
 
       # =====================================================================
-      # Step 2: 可选禁用 fork 内 workflows,避免 schedule/push 在目标 fork 里制造新提交。
+      # 阶段1 (08:00 北京): 检测有更新的 fork 并分批,写入注册表
+      #   - 每 FULL_CHECK_INTERVAL_DAYS 天全量重检,重建可同步/不可同步列表
+      #   - 轻量识别新 fork;对可同步+新 fork 用 compare 检测是否有更新
+      #   - 有更新的按 SYNC_BATCH_SIZE 分批 → registry.pending_batches
+      # =====================================================================
+      - name: Check forks (阶段1/检测)
+        id: check
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 0 * * *'
+        env:
+          FILTER: ${{ inputs.upstream_owner_filter }}
+          EXCLUDE_REPOS: ${{ inputs.exclude_repos || env.CONFIG_EXCLUDE_REPOS }}
+          CRON_SCHEDULE: ${{ inputs.cron_schedule }}
+          CONFIG_REPO: ${{ github.event.repository.name }}
+          TARGET_OWNERS: ${{ inputs.target_owners }}
+          ONLY_REPOS: ${{ inputs.only_repos }}
+          SYNC_BATCH_SIZE: ${{ env.CONFIG_SYNC_BATCH_SIZE || env.DEFAULT_SYNC_BATCH_SIZE || '15' }}
+          SYNC_RATE_SAFE_THRESHOLD: ${{ env.CONFIG_SYNC_RATE_SAFE_THRESHOLD || env.DEFAULT_SYNC_RATE_SAFE_THRESHOLD || '300' }}
+          FULL_CHECK_INTERVAL_DAYS: ${{ env.CONFIG_FULL_CHECK_INTERVAL_DAYS || env.DEFAULT_FULL_CHECK_INTERVAL_DAYS || '14' }}
+          COMPARE_BATCH_SIZE: ${{ env.CONFIG_COMPARE_BATCH_SIZE || env.DEFAULT_COMPARE_BATCH_SIZE || '100' }}
+        run: scripts/check-updates.sh
+
+      # =====================================================================
+      # 阶段2 (09:00 北京): 同步。把注册表 pending_batches 展开成 forks.json
+      # (供禁用/同步使用; 大 JSON 不通过 env 传, Linux 单 env 限 ~128KB)
+      # =====================================================================
+      - name: Prepare sync list (阶段2/准备)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 1 * * *'
+        env:
+          CONFIG_REPO: ${{ github.event.repository.name }}
+        run: scripts/prepare-sync-list.sh
+
+      # =====================================================================
+      # 阶段2: 可选禁用 fork 内 workflows,避免 schedule/push 在目标 fork 里制造新提交。
       # 默认关闭;正式启用前可以配合 dry_run=true 先看将禁用哪些 workflow。
       # =====================================================================
-      - name: Disable fork workflows
+      - name: Disable fork workflows (阶段2/禁用)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 1 * * *'
         env:
           FORKS_FILE: ${{ runner.temp }}/forks.json
           DRY_RUN: ${{ inputs.dry_run }}
@@ -250,11 +291,12 @@ jobs:
         run: scripts/disable-fork-workflows.sh
 
       # =====================================================================
-      # Step 3: 并发同步 fork (脚本化实现,避免 workflow YAML 继续膨胀)
+      # 阶段2: 并发同步注册表里的 pending_batches (只同步有更新的 fork)
+      #   每批后检查配额;失败的在主 run 末尾重试一次;仍失败写入 retry_failed
       # =====================================================================
-      - name: Sync each fork
+      - name: Sync each fork (阶段2/同步)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 1 * * *'
         env:
-          FORKS_FILE: ${{ runner.temp }}/forks.json
           MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
           SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.CONFIG_SIZE_DROP_THRESHOLD || env.DEFAULT_SIZE_DROP_THRESHOLD }}
           SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}
@@ -274,6 +316,32 @@ jobs:
           SYNC_RATE_SAFE_THRESHOLD: ${{ env.CONFIG_SYNC_RATE_SAFE_THRESHOLD || env.DEFAULT_SYNC_RATE_SAFE_THRESHOLD || '300' }}
           DISCARD_LOCAL_CHANGES: ${{ inputs.discard_local_changes || env.CONFIG_DISCARD_LOCAL_CHANGES || env.DEFAULT_DISCARD_LOCAL_CHANGES }}
         run: scripts/sync-each-fork.sh
+
+      # =====================================================================
+      # 阶段3 (20:00 北京): 重试多次失败列表 (retry_failed)
+      #   成功移除;失败 failures+1;达到阈值写入告警列表供通知
+      # =====================================================================
+      - name: Retry failed forks (阶段3/重试)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 12 * * *'
+        env:
+          MAX_PARALLEL: ${{ inputs.max_parallel || env.CONFIG_MAX_PARALLEL || env.DEFAULT_MAX_PARALLEL }}
+          SIZE_DROP_THRESHOLD: ${{ inputs.size_drop_threshold || env.CONFIG_SIZE_DROP_THRESHOLD || env.DEFAULT_SIZE_DROP_THRESHOLD }}
+          SIZE_CHECK_EXEMPT: ${{ inputs.size_check_exempt || env.CONFIG_SIZE_CHECK_EXEMPT || env.DEFAULT_SIZE_CHECK_EXEMPT }}
+          MAX_BRANCHES_PER_FORK: ${{ inputs.max_branches_per_fork || env.CONFIG_MAX_BRANCHES_PER_FORK || env.DEFAULT_MAX_BRANCHES_PER_FORK }}
+          SKIP_BRANCH_PATTERNS: ${{ inputs.skip_branch_patterns || env.CONFIG_SKIP_BRANCH_PATTERNS || env.DEFAULT_SKIP_BRANCH_PATTERNS }}
+          FULL_BRANCH_SYNC_REPOS: ${{ inputs.full_branch_sync_repos || env.CONFIG_FULL_BRANCH_SYNC_REPOS || env.DEFAULT_FULL_BRANCH_SYNC_REPOS }}
+          BRANCH_LIMIT_GROUPS: ${{ inputs.branch_limit_groups || env.CONFIG_BRANCH_LIMIT_GROUPS || env.DEFAULT_BRANCH_LIMIT_GROUPS }}
+          BRANCH_LIMIT_OVERRIDES: ${{ inputs.branch_limit_overrides || env.CONFIG_BRANCH_LIMIT_OVERRIDES || env.DEFAULT_BRANCH_LIMIT_OVERRIDES }}
+          PROTECTED_SKIP_REPOS: ${{ env.CONFIG_PROTECTED_SKIP_REPOS || env.DEFAULT_PROTECTED_SKIP_REPOS }}
+          BACKUP_THEN_SYNC_REPOS: ${{ env.CONFIG_BACKUP_THEN_SYNC_REPOS || env.DEFAULT_BACKUP_THEN_SYNC_REPOS }}
+          LEGACY_BACKUP_REPO: ${{ env.CONFIG_LEGACY_BACKUP_REPO || env.DEFAULT_LEGACY_BACKUP_REPO }}
+          LEGACY_BACKUP_BRANCH_PREFIX: ${{ env.CONFIG_LEGACY_BACKUP_BRANCH_PREFIX || env.DEFAULT_LEGACY_BACKUP_BRANCH_PREFIX }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SYNC_MODE: ${{ inputs.sync_mode || env.CONFIG_SYNC_MODE || 'auto' }}
+          CONFIG_REPO: ${{ github.event.repository.name }}
+          RETRY_ALERT_THRESHOLD: ${{ env.CONFIG_RETRY_ALERT_THRESHOLD || env.DEFAULT_RETRY_ALERT_THRESHOLD || '3' }}
+          DISCARD_LOCAL_CHANGES: ${{ inputs.discard_local_changes || env.CONFIG_DISCARD_LOCAL_CHANGES || env.DEFAULT_DISCARD_LOCAL_CHANGES }}
+        run: scripts/retry-failed.sh
 
       # =====================================================================
       # Step 4: Drift 检测 (Item 15)

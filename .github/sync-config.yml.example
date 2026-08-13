@@ -57,6 +57,17 @@ workflow_disable_ttl_days: 14
 sync_batch_size: 15
 sync_rate_safe_threshold: 300
 
+# 三阶段模型 (三阶段由 workflow schedule 自动触发,无需额外配置):
+#   full_check_interval_days: 每 N 天全量重检一次"可同步/不可同步"列表 (默认 14)
+#     - 全量重检时才扫描所有 fork 并逐个 enrich (费配额)
+#     - 其余每天只轻量对比 fork 列表 + 对新 fork 单独 enrich
+#   compare_batch_size: 阶段1 检测更新时每批检测的 fork 数,批间查配额 (默认 100)
+#   retry_alert_threshold: 连续失败达到此次数后进入告警列表,通知里标红 (默认 3)
+# 建议: 配额紧张时调大 full_check_interval_days、调小 compare_batch_size
+full_check_interval_days: 14
+compare_batch_size: 100
+retry_alert_threshold: 3
+
 # 上游体积暴减告警阈值 (上游体积/fork 体积 < 此值触发,跳过 fork)
 # 0.10 = 敏感 (推荐)  0.30 = 宽松  0 = 关闭
 size_drop_threshold: 0.10

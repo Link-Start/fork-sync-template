@@ -91,7 +91,48 @@ gh api -X POST repos/Link-Start/Spider_XHS_cv-cat/git/refs \
 
 ## 执行流程详解
 
-整个 workflow 分 **5 个阶段**:
+### 顶层: 三阶段模型 (workflow 层面)
+
+整个 workflow 每天拆成三个独立的定时阶段,通过 `workflow-state` 分支的 `fork-registry.json` 注册表串联。**关键优化:阶段1 只对"候选 fork"做 compare,阶段2 只同步"有更新的 fork"**,不再每次全量 discover + 全量 compare,省配额:
+
+```
+┌──────────────────────────────────────────────┐
+│ 阶段1 (每天 08:00 北京) check-updates.sh      │
+│   - 每 full_check_interval_days 天全量重检:   │
+│     discover 所有 fork + 逐个 enrich          │
+│     → 重建 syncable / unsyncable / new 列表   │
+│   - 其余每天轻量 diff:                        │
+│     对比 fork 列表,识别新 fork + 移除的 fork   │
+│   - 对 syncable + new 的 fork 用 compare      │
+│     检测是否有更新 (compare_batch_size 分批)   │
+│   - 有更新的按 sync_batch_size 分批            │
+│     → registry.pending_batches               │
+└──────────────────┬───────────────────────────┘
+                   ↓
+┌──────────────────────────────────────────────┐
+│ 阶段2 (每天 09:00 北京) sync-each-fork.sh     │
+│   - 读 registry.pending_batches              │
+│   - 逐批并发同步 (每批后查配额,低于安全线提前结束)│
+│   - 新 fork 同步成功 → 移入 syncable           │
+│   - 失败 → run 末尾重试一次                   │
+│   - 仍失败 → 写入 registry.retry_failed       │
+│   (每 fork 内部的 5 阶段流程见下方)            │
+└──────────────────┬───────────────────────────┘
+                   ↓
+┌──────────────────────────────────────────────┐
+│ 阶段3 (每天 20:00 北京) retry-failed.sh       │
+│   - 读 registry.retry_failed                 │
+│   - 逐个重试一次                              │
+│   - 成功 → 从列表移除;失败 → failures+1       │
+│   - 达 retry_alert_threshold → 告警列表       │
+└──────────────────────────────────────────────┘
+```
+
+手动触发 (`workflow_dispatch`) 按顺序跑完三个阶段,方便一次性测试。
+
+### 单 fork 内部: 5 阶段同步流程 (fork-worker.sh)
+
+阶段2 里每个 fork 的处理仍分 **5 个阶段**:
 
 ```
 ┌──────────────────────────────────────────────┐

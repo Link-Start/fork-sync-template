@@ -27,3 +27,11 @@ workflow_disable_ttl_days: 14
 # 低于 sync_rate_safe_threshold 则提前结束,剩余 fork 下次 run 自动补上 (幂等)。
 sync_batch_size: 15
 sync_rate_safe_threshold: 300
+
+# 三阶段模型:
+#   full_check_interval_days: 每 N 天全量重检一次"可同步/不可同步"列表 (默认 14)
+#   compare_batch_size:       阶段1 检测更新时每批检测的 fork 数,批间查配额 (默认 100)
+#   retry_alert_threshold:    连续失败达到此次数后进入告警列表 (默认 3)
+full_check_interval_days: 14
+compare_batch_size: 100
+retry_alert_threshold: 3
