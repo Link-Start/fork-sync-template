@@ -30,6 +30,43 @@ process_fork() {
     printf '%s' "$1" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' || true
   }
 
+  # verify_fork_ref_sha: PATCH force update 后校验 fork ref 是否到达目标 SHA。
+  # PATCH 成功但立即 GET 可能命中 GitHub 最终一致性延迟(读到旧 SHA),
+  # 因此做带退避的重试,避免把"已成功的同步"误判为失败。
+  # 返回 0 表示确认一致;返回 1 表示确认不一致(此时变量里是最新的实测 SHA 与错误)。
+  verify_fork_ref_sha() {
+    local branch="$1" expect_sha="$2"
+    local out_var="${3:-VERIFY_SHA}" err_var="${4:-VERIFY_ERR}"
+    local api="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
+    local attempt=1 max_attempts=3 delay=2 got="" err=""
+    while [ "$attempt" -le "$max_attempts" ]; do
+      if gh_api_capture got err "$api" --jq '.object.sha' && [ -n "$got" ]; then
+        if [ "$got" = "$expect_sha" ]; then
+          printf -v "$out_var" '%s' "$got"
+          printf -v "$err_var" '%s' ""
+          return 0
+        fi
+        # 成功读到但 SHA 不一致 → 可能是最终一致性延迟,短暂等待后重读
+        if [ "$attempt" -lt "$max_attempts" ]; then
+          echo "  ⏳ 校验 SHA 不一致(fork=${got:0:7} != upstream=${expect_sha:0:7}),等待 ${delay}s 重试 (${attempt}/${max_attempts})" >&2
+          sleep "$delay"
+          delay=$((delay * 2))
+        fi
+      else
+        # API 调用失败 → 重试
+        if [ "$attempt" -lt "$max_attempts" ]; then
+          echo "  ⏳ 校验 API 失败,${delay}s 后重试 (${attempt}/${max_attempts})" >&2
+          sleep "$delay"
+          delay=$((delay * 2))
+        fi
+      fi
+      attempt=$((attempt + 1))
+    done
+    printf -v "$out_var" '%s' "${got:-}"
+    printf -v "$err_var" '%s' "$err"
+    return 1
+  }
+
   repo_in_csv() {
     local list="$1"
     [ -z "$list" ] && return 1
@@ -1031,11 +1068,7 @@ process_fork() {
               continue
             fi
             VERIFY_API="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
-            if ! gh_api_capture VERIFY_SHA VERIFY_ERR "$VERIFY_API" \
-                 --jq '.object.sha'; then
-              VERIFY_SHA=""
-            fi
-            if [ "$VERIFY_SHA" = "$UPSTREAM_SHA" ]; then
+            if verify_fork_ref_sha "$branch" "$UPSTREAM_SHA" VERIFY_SHA VERIFY_ERR; then
               echo "    ⏩ Discard commits: 丢弃 $AHEAD + 同步 $BEHIND → ${UPSTREAM_SHA:0:7}"
               SYNCED+=("$branch")
               log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="discard_commits" ahead="$AHEAD" behind="$BEHIND" upstream_sha="${UPSTREAM_SHA:0:7}"
@@ -1102,11 +1135,7 @@ process_fork() {
                 continue
               fi
               ORPHAN_VERIFY_API="repos/$FORK_OWNER/$FORK_REPO/git/ref/heads/$branch"
-              if ! gh_api_capture ORPHAN_VERIFY_SHA ORPHAN_VERIFY_ERR "$ORPHAN_VERIFY_API" \
-                   --jq '.object.sha'; then
-                ORPHAN_VERIFY_SHA=""
-              fi
-              if [ "$ORPHAN_VERIFY_SHA" = "$UPSTREAM_SHA" ]; then
+              if verify_fork_ref_sha "$branch" "$UPSTREAM_SHA" ORPHAN_VERIFY_SHA ORPHAN_VERIFY_ERR; then
                 echo "    ⏩ Discard commits: 无共同祖先 → ${UPSTREAM_SHA:0:7}"
                 SYNCED+=("$branch")
                 log_event "$FORK_REPO" "sync_branch" "ok" branch="$branch" mode="discard_no_common_ancestor" upstream_sha="${UPSTREAM_SHA:0:7}" backup_branch="$ORPHAN_BACKUP_BRANCH"
