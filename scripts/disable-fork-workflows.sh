@@ -421,14 +421,14 @@ else
   fi
 
   B64_CONTENT=$(echo "$NEW_STATE" | b64_encode)
-  PUT_ARGS=(-X PUT "repos/$MY_OWNER/${CONFIG_REPO:-}/contents/$STATE_FILE" \
-    -f message="chore: update workflow disable state (run ${GITHUB_RUN_ID:-manual})" \
-    -f content="$B64_CONTENT" \
-    -f branch="$STATE_BRANCH")
+  local body_file="$RUNNER_TEMP/wf-disable-put.json"
+  printf '{"message":"chore: update workflow disable state (run %s)","content":"%s","branch":"%s"' \
+    "${GITHUB_RUN_ID:-manual}" "$B64_CONTENT" "$STATE_BRANCH" > "$body_file"
   if [ -n "$OLD_STATE_SHA" ]; then
-    PUT_ARGS+=(-f sha="$OLD_STATE_SHA")
+    printf ',"sha":"%s"' "$OLD_STATE_SHA" >> "$body_file"
   fi
-  gh_api_with_retry "${PUT_ARGS[@]}" >/dev/null 2>&1 && \
+  printf '}' >> "$body_file"
+  gh_api_with_retry -X PUT "repos/$MY_OWNER/${CONFIG_REPO:-}/contents/$STATE_FILE" --input "$body_file" >/dev/null 2>&1 && \
     echo "📝 $STATE_BRANCH/$STATE_FILE 已更新" || \
     echo "::warning::$STATE_BRANCH/$STATE_FILE 写回失败(权限或冲突)"
 fi

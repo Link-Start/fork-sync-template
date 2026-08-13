@@ -74,16 +74,16 @@ registry_write() {
   fi
 
   b64=$(printf '%s' "$new_state" | b64_encode)
-  local -a PUT_ARGS
-  PUT_ARGS=(-X PUT "repos/$MY_OWNER/${CONFIG_REPO:-}/contents/$REGISTRY_FILE" \
-    -f message="chore: update fork registry (run ${GITHUB_RUN_ID:-manual})" \
-    -f content="$b64" \
-    -f branch="$REGISTRY_BRANCH")
+  # 用文件传 body: content 可能 >128KB,经命令行参数传会报 Argument list too long
+  local body_file="$RUNNER_TEMP/fork-registry-put.json"
+  printf '{"message":"chore: update fork registry (run %s)","content":"%s","branch":"%s"' \
+    "${GITHUB_RUN_ID:-manual}" "$b64" "$REGISTRY_BRANCH" > "$body_file"
   if [ -n "$old_sha" ]; then
-    PUT_ARGS+=(-f sha="$old_sha")
+    printf ',"sha":"%s"' "$old_sha" >> "$body_file"
   fi
-  local put_out put_err
-  put_out=$(gh_api_with_retry "${PUT_ARGS[@]}" 2>&1) && {
+  printf '}' >> "$body_file"
+  local put_out
+  put_out=$(gh_api_with_retry -X PUT "repos/$MY_OWNER/${CONFIG_REPO:-}/contents/$REGISTRY_FILE" --input "$body_file" 2>&1) && {
     echo "📝 $REGISTRY_BRANCH/$REGISTRY_FILE 已更新"
     return 0
   }
