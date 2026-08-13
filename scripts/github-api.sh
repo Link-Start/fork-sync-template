@@ -38,7 +38,14 @@ gh_api_with_retry() {
       return 0
     fi
     if printf '%s' "$output" | grep -Eiq 'rate limit|API rate limit exceeded'; then
-      wait_for_core_rate_limit && continue
+      if wait_for_core_rate_limit; then
+        continue
+      fi
+      if printf '%s' "$output" | grep -Eiq 'secondary rate limit|abuse detection'; then
+        echo "  secondary rate limit 触发,等待 60s 后重试" >&2
+        sleep 60
+        continue
+      fi
     fi
     if [ "$attempt" -lt "$max_attempts" ]; then
       echo "  gh api failed ($attempt/$max_attempts), retrying in ${delay}s: $(printf '%s' "$output" | head -1)" >&2

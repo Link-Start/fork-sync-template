@@ -57,6 +57,10 @@ echo "📋 已加载注册表: $(echo "$REGISTRY" | jq -r '((.syncable|length) /
 needs_full_check() {
   local last elapsed
   [ -n "$TARGET_OWNERS" ] && return 0
+  if [ -n "$ONLY_REPOS" ]; then
+    echo "  ↳ only_repos 快速模式: 跳过全量重建 (targeted enrich 补齐指定 fork)"
+    return 1
+  fi
   last=$(echo "$REGISTRY" | jq -r '.last_full_check_at // ""' 2>/dev/null || echo "")
   [ -z "$last" ] && return 0
   elapsed=$((NOW_EPOCH - $(iso_to_epoch "$last")))
@@ -124,6 +128,10 @@ full_check() {
 #   - 消失 → 从注册表移除
 # =====================================================================
 light_check() {
+  if [ -n "$ONLY_REPOS" ]; then
+    echo "🔍 轻量检测: only_repos 模式跳过全量扫描(只检测 $ONLY_REPOS)"
+    return 0
+  fi
   echo "🔍 轻量检测: 对比当前 fork 列表与注册表"
   local current_lines
   current_lines=$(gh_api_with_retry --paginate "user/repos?per_page=100&type=owner&sort=updated" \
@@ -221,7 +229,7 @@ detect_updates() {
     want_json=$(echo "$ONLY_REPOS" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
     want=$(echo "$candidates" | jq -c --argjson w "$want_json" \
       '[.[] | select((.name | ascii_downcase) as $n | ($w | map(ascii_downcase) | index($n)) != null
-        or ((.fork_owner + "/" + .name | ascii_downcase) | ($w | map(ascii_downcase) | index(.)) != null))]')
+        or ((.fork_owner + "/" + .name | ascii_downcase) as $full | ($w | map(ascii_downcase) | index($full)) != null))]')
     local want_count
     want_count=$(echo "$want" | jq length)
     if [ "$want_count" -eq 0 ]; then
@@ -231,10 +239,10 @@ detect_updates() {
         [ -z "$selector" ] && continue
         enrich_new_fork "$selector"
       done < <(echo "$want_json" | jq -r '.[]')
-      candidates=$(echo "$REGISTRY" | jq -c '[.syncable[], (.new[] // empty)]')
+      candidates=$(echo "$REGISTRY" | jq -c '[(.syncable // [])[], ((.new // [])[] // empty)]')
       want=$(echo "$candidates" | jq -c --argjson w "$want_json" \
         '[.[] | select((.name | ascii_downcase) as $n | ($w | map(ascii_downcase) | index($n)) != null
-          or ((.fork_owner + "/" + .name | ascii_downcase) | ($w | map(ascii_downcase) | index(.)) != null))]')
+          or ((.fork_owner + "/" + .name | ascii_downcase) as $full | ($w | map(ascii_downcase) | index($full)) != null))]')
       want_count=$(echo "$want" | jq length)
     fi
     if [ "$want_count" -eq 0 ]; then

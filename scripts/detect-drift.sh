@@ -122,7 +122,8 @@ else
   if [ -n "$OLD_SHA" ]; then
     PUT_ARGS+=(-f sha="$OLD_SHA")
   fi
-  gh_api_with_retry "${PUT_ARGS[@]}" >/dev/null 2>&1 && \
+  local put_out
+  put_out=$(gh_api_with_retry "${PUT_ARGS[@]}" 2>&1) && \
     echo "📝 $STATE_BRANCH/$DRIFT_FILE 已更新" || \
-    echo "::warning::$STATE_BRANCH/$DRIFT_FILE 写回失败(权限或冲突)"
+    echo "::warning::$STATE_BRANCH/$DRIFT_FILE 写回失败(权限或冲突): $(printf '%s' "$put_out" | head -1)"
 fi

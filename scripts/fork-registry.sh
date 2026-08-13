@@ -22,20 +22,31 @@ b64_encode() {
   base64 -w 0 2>/dev/null || base64 | tr -d '\n'
 }
 
-# 读注册表,输出 JSON(不存在则 "{}")
+# 读注册表,输出 JSON(不存在则规范化默认结构)
 registry_read() {
-  local raw b64
+  local raw b64 content
   raw=$(gh_api_with_retry "repos/$MY_OWNER/${CONFIG_REPO:-}/contents/$REGISTRY_FILE?ref=$REGISTRY_BRANCH" 2>/dev/null || echo "")
   if [ -n "$raw" ] && [ "$raw" != "Not Found" ]; then
     b64=$(echo "$raw" | jq -r '.content // ""')
     if [ -n "$b64" ]; then
-      echo "$b64" | base64 -d 2>/dev/null || echo "{}"
+      content=$(echo "$b64" | base64 -d 2>/dev/null || echo "{}")
     else
-      echo "{}"
+      content="{}"
     fi
   else
-    echo "{}"
+    content="{}"
   fi
+  echo "$content" | jq -c '{
+    updated_at: (.updated_at // ""),
+    last_full_check_at: (.last_full_check_at // ""),
+    full_check_interval_days: (.full_check_interval_days // 0),
+    syncable: (.syncable // []),
+    unsyncable: (.unsyncable // []),
+    new: (.new // []),
+    retry_failed: (.retry_failed // []),
+    pending_batches: (.pending_batches // []),
+    pending_generated_at: (.pending_generated_at // "")
+  }'
 }
 
 # 写回注册表(条件更新,带 sha;分支不存在则创建)
@@ -71,9 +82,10 @@ registry_write() {
   if [ -n "$old_sha" ]; then
     PUT_ARGS+=(-f sha="$old_sha")
   fi
-  if gh_api_with_retry "${PUT_ARGS[@]}" >/dev/null 2>&1; then
+  local put_out put_err
+  put_out=$(gh_api_with_retry "${PUT_ARGS[@]}" 2>&1) && {
     echo "📝 $REGISTRY_BRANCH/$REGISTRY_FILE 已更新"
-  else
-    echo "::warning::$REGISTRY_BRANCH/$REGISTRY_FILE 写回失败(权限或冲突)"
-  fi
+    return 0
+  }
+  echo "::warning::$REGISTRY_BRANCH/$REGISTRY_FILE 写回失败(权限或冲突): $(printf '%s' "$put_out" | head -1)"
 }
