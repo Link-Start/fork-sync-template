@@ -421,7 +421,7 @@ else
   fi
 
   B64_CONTENT=$(echo "$NEW_STATE" | b64_encode)
-  local body_file="$RUNNER_TEMP/wf-disable-put.json"
+  body_file="$RUNNER_TEMP/wf-disable-put.json"
   printf '{"message":"chore: update workflow disable state (run %s)","content":"%s","branch":"%s"' \
     "${GITHUB_RUN_ID:-manual}" "$B64_CONTENT" "$STATE_BRANCH" > "$body_file"
   if [ -n "$OLD_STATE_SHA" ]; then

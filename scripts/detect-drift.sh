@@ -115,14 +115,13 @@ else
   fi
 
   B64_CONTENT=$(echo "$NEW_STATE" | base64 -w 0)
-  local body_file="$RUNNER_TEMP/drift-put.json"
+  body_file="$RUNNER_TEMP/drift-put.json"
   printf '{"message":"chore: update drift state (run %s)","content":"%s","branch":"%s"' \
     "$GITHUB_RUN_ID" "$B64_CONTENT" "$STATE_BRANCH" > "$body_file"
   if [ -n "$OLD_SHA" ]; then
     printf ',"sha":"%s"' "$OLD_SHA" >> "$body_file"
   fi
   printf '}' >> "$body_file"
-  local put_out
   put_out=$(gh_api_with_retry -X PUT "repos/$MY_OWNER/$REPO/contents/$DRIFT_FILE" --input "$body_file" 2>&1) && \
     echo "📝 $STATE_BRANCH/$DRIFT_FILE 已更新" || \
     echo "::warning::$STATE_BRANCH/$DRIFT_FILE 写回失败(权限或冲突): $(printf '%s' "$put_out" | head -1)"
