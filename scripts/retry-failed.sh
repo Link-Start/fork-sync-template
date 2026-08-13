@@ -16,7 +16,8 @@ source "$SCRIPT_DIR/fork-registry.sh"
 LOG_DIR=$(mktemp -d)
 trap 'rm -rf "$LOG_DIR"' EXIT
 : >> "$RUNNER_TEMP/events.jsonl"
-: > "$RUNNER_TEMP/summary.jsonl"
+# summary.jsonl 不在此清空:workflow_dispatch 全跑时阶段2/阶段3 共享 RUNNER_TEMP,
+# 保留阶段2 的同步摘要供 post-issue-summary 汇总(scheduled 模式各自独立,不受影响)
 
 REGISTRY=$(registry_read)
 RETRY_LIST=$(echo "$REGISTRY" | jq -c '.retry_failed // []' 2>/dev/null || echo "[]")
