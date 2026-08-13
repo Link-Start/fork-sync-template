@@ -1,1 +1,1 @@
-{"updated_at":"","last_full_check_at":"","full_check_interval_days":14,"syncable":[],"unsyncable":[],"new":[],"retry_failed":[],"pending_batches":[],"pending_generated_at":""}
+{"updated_at":"2026-08-13T09:00:45Z","last_full_check_at":"","full_check_interval_days":14,"syncable":[],"unsyncable":[],"new":[{"repo":"Link-Start/fastapi_fastapi","name":"fastapi_fastapi","fork_owner":"Link-Start","fork_default_branch":"master","parent_owner":"fastapi","parent_name":"fastapi","parent_default_branch":"master","is_new":true}],"retry_failed":[],"pending_batches":[]}
