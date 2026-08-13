@@ -1,5 +1,149 @@
 {
   "forks": {
+    "DarkGPT_Jawaz-Keyzor": {
+      "last_result": "skip",
+      "last_ts": "2026-08-13T11:24:16.878Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "EverOS_EverMind-AI": {
+      "last_result": "skip",
+      "last_ts": "2026-08-13T11:24:14.009Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "IPTV_CCSH": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:17.067Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "MonkeyCode-chaitin": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:23.472Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "Motrix_agalwood": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:27.879Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "OmniRoute_diegosouzapw": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:33.103Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "Operit_AAswordman": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:32.284Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "app.yumcut.com-IgorShadurin": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:32.647Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "cherry-studio-CherryHQ": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:46.360Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "codex2api_james-6-23": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:41.777Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "codex_openai": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:23.539Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "codex_register_Hermylivid261": {
+      "last_result": "skip",
+      "last_ts": "2026-08-13T11:24:42.121Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "colleague-skill-titanwings": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:24:56.161Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "douyin_erma0": {
+      "last_result": "skip",
+      "last_ts": "2026-08-13T11:24:48.007Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "emdash-generalaction": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:11.515Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "free-proxy-list_proxifly": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:33.205Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "frida_frida": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:34.009Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "gpt2api_432539": {
+      "last_result": "skip",
+      "last_ts": "2026-08-13T11:25:25.087Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "grok2api_chenyme": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:39.235Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "lark-cli-arksuite": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:42.141Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "llmfit-AlexsJones": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:49.332Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "mempalace-milla-jovovich": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:49.402Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "register_MasterAlanLab": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:49.996Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "sam-image-app_SamuelYooo": {
+      "last_result": "complete",
+      "last_ts": "2026-08-13T11:25:56.927Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "Claude-Code-Compiled-roger2ai": {
       "last_result": "skip",
       "last_ts": "2026-08-13T10:24:55.289Z",
@@ -12,87 +156,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "DarkGPT_Jawaz-Keyzor": {
-      "last_result": "skip",
-      "last_ts": "2026-08-13T10:24:04.435Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "EverOS_EverMind-AI": {
-      "last_result": "skip",
-      "last_ts": "2026-08-13T10:24:01.407Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "Motrix_agalwood": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:09.147Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "OmniRoute_diegosouzapw": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:15.531Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "cherry-studio-CherryHQ": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:22.086Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "codex2api_james-6-23": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:15.634Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "codex_register_Hermylivid261": {
-      "last_result": "skip",
-      "last_ts": "2026-08-13T10:24:17.522Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "colleague-skill-titanwings": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:27.729Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "douyin_erma0": {
-      "last_result": "skip",
-      "last_ts": "2026-08-13T10:24:20.880Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "free-proxy-list_proxifly": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:25.197Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "gpt2api_432539": {
-      "last_result": "skip",
-      "last_ts": "2026-08-13T10:24:21.835Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "hermes-agent-NousResearch": {
       "last_result": "complete",
       "last_ts": "2026-08-13T10:24:46.610Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "mempalace-milla-jovovich": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:35.757Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "register_MasterAlanLab": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:34.319Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -101,13 +167,7 @@
       "last_ts": "2026-08-13T10:24:57.519Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
-    },
-    "sam-image-app_SamuelYooo": {
-      "last_result": "complete",
-      "last_ts": "2026-08-13T10:24:59.407Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
     }
   },
-  "updated_at": "2026-08-13T10:25:02Z"
+  "updated_at": "2026-08-13T11:26:02Z"
 }
