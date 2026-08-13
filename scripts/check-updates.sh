@@ -339,4 +339,10 @@ fi
 light_check
 detect_updates
 registry_write "$REGISTRY"
+
+# 阶段1直接生成阶段2用的 forks.json,避免 prepare 再读注册表时
+# 命中 GitHub contents API 的最终一致性延迟(刚写回后立即读可能拿到旧 commit)
+echo "$REGISTRY" | jq -c '[.pending_batches[]? | .[]]' > "$RUNNER_TEMP/forks.json" 2>/dev/null \
+  && echo "📝 已生成 $RUNNER_TEMP/forks.json 供阶段2使用" || true
+
 echo "✅ 8 点检测完成"
