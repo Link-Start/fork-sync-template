@@ -228,8 +228,8 @@ detect_updates() {
     local want_json want
     want_json=$(echo "$ONLY_REPOS" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
     want=$(echo "$candidates" | jq -c --argjson w "$want_json" \
-      '[.[] | select((.name | ascii_downcase) as $n | ($w | map(ascii_downcase) | index($n)) != null
-        or ((.fork_owner + "/" + .name | ascii_downcase) as $full | ($w | map(ascii_downcase) | index($full)) != null))]')
+      '[.[] | select((.repo // "") as $r | (($w | map(ascii_downcase) | index($r | ascii_downcase)) != null
+        or (($r | split("/")[-1]) as $n | ($w | map(ascii_downcase) | index($n)) != null)))]')
     local want_count
     want_count=$(echo "$want" | jq length)
     if [ "$want_count" -eq 0 ]; then
@@ -241,8 +241,8 @@ detect_updates() {
       done < <(echo "$want_json" | jq -r '.[]')
       candidates=$(echo "$REGISTRY" | jq -c '[(.syncable // [])[], ((.new // [])[] // empty)]')
       want=$(echo "$candidates" | jq -c --argjson w "$want_json" \
-        '[.[] | select((.name | ascii_downcase) as $n | ($w | map(ascii_downcase) | index($n)) != null
-          or ((.fork_owner + "/" + .name | ascii_downcase) as $full | ($w | map(ascii_downcase) | index($full)) != null))]')
+        '[.[] | select((.repo // "") as $r | (($w | map(ascii_downcase) | index($r | ascii_downcase)) != null
+          or (($r | split("/")[-1]) as $n | ($w | map(ascii_downcase) | index($n)) != null)))]')
       want_count=$(echo "$want" | jq length)
     fi
     if [ "$want_count" -eq 0 ]; then
