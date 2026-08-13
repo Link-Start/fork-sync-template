@@ -35,20 +35,24 @@ NEW_STATE=$(jq -s --argjson old "$OLD_STATE" '
     forks: (
       ($old.forks // {}) as $old_forks
       | .[0] as $current
-      | $current | keys | map(
+      | ($current | keys) as $current_keys
+      | ($old_forks | keys) as $old_keys
+      | ($current_keys + ($old_keys - $current_keys)) as $all_keys
+      | $all_keys | map(
           . as $fork
-          | $current[$fork].last_result as $result
-          | ($old_forks[$fork].consecutive_failures // 0) as $old_cf
+          | $current[$fork] as $cur
+          | $old_forks[$fork] as $old
           | {
               ($fork): {
-                last_result: $result,
-                last_ts: $current[$fork].last_ts,
+                last_result: ($cur.last_result // $old.last_result // "unknown"),
+                last_ts: ($cur.last_ts // $old.last_ts // ""),
                 consecutive_failures: (
-                  if $result == "fail" then $old_cf + 1
+                  if $cur == null then ($old.consecutive_failures // 0)
+                  elif ($cur.last_result // "") == "fail" then (($old.consecutive_failures // 0) + 1)
                   else 0
                   end
                 ),
-                last_alert_ts: (if $old_forks[$fork].last_alert_ts == null then null else $old_forks[$fork].last_alert_ts end)
+                last_alert_ts: ($old.last_alert_ts // null)
               }
             }
         ) | add // {}

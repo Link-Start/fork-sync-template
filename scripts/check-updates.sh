@@ -13,6 +13,15 @@ source "$SCRIPT_DIR/common.sh"
 source "$SCRIPT_DIR/github-api.sh"
 source "$SCRIPT_DIR/fork-registry.sh"
 
+# 排除规则: 仓库名含 EXCLUDE_PATTERN 的 fork 不进入注册表/不参与检测
+# (与 discover-forks.sh 保持一致, 大小写不敏感, 只匹配 fork 仓库名)
+EXCLUDE_PATTERN=${EXCLUDE_PATTERN:-}
+exclude_matches() {
+  local name="$1"
+  [ -z "$EXCLUDE_PATTERN" ] && return 1
+  printf '%s' "$name" | grep -Eiq "$EXCLUDE_PATTERN"
+}
+
 iso_to_epoch() {
   local ts="$1"
   date -d "$ts" +%s 2>/dev/null \
@@ -146,6 +155,18 @@ light_check() {
   added=$(echo "$current" | jq -c --argjson known "$known" '[.[] | select(.repo as $r | ($known | index($r)) == null)]')
   removed=$(echo "$known" | jq -c --argjson cur "$current" '[.[] | select(. as $r | ($cur | map(.repo) | index($r)) == null)]')
 
+  # 应用 EXCLUDE_PATTERN: 新 fork 含排除关键词的跳过,不进注册表
+  if [ -n "$EXCLUDE_PATTERN" ]; then
+    local before added_excluded
+    before=$(echo "$added" | jq length)
+    added=$(echo "$added" | jq --arg e "$EXCLUDE_PATTERN" \
+      '[.[] | select((.name // "" | ascii_downcase | contains($e | ascii_downcase)) | not)]')
+    added_excluded=$(echo "$added" | jq length)
+    if [ "$added_excluded" -lt "$before" ]; then
+      echo "🚫 排除 $((before - added_excluded)) 个含 '$EXCLUDE_PATTERN' 的新 fork"
+    fi
+  fi
+
   local added_count removed_count
   added_count=$(echo "$added" | jq length 2>/dev/null || echo 0)
   removed_count=$(echo "$removed" | jq length 2>/dev/null || echo 0)
@@ -223,6 +244,24 @@ enrich_new_fork() {
 detect_updates() {
   local candidates
   candidates=$(echo "$REGISTRY" | jq -c '[(.syncable // [])[], ((.new // [])[] // empty)]')
+  # 历史残留过滤: 注册表里可能混入符合排除规则的 fork(如轻量检测漏网),
+  # compare 前统一剔除,避免浪费配额或误同步;并同步净化注册表
+  if [ -n "$EXCLUDE_PATTERN" ]; then
+    local before after
+    before=$(echo "$candidates" | jq length)
+    candidates=$(echo "$candidates" | jq --arg e "$EXCLUDE_PATTERN" \
+      '[.[] | select((.name // "" | ascii_downcase | contains($e | ascii_downcase)) | not)]')
+    after=$(echo "$candidates" | jq length)
+    if [ "$after" -lt "$before" ]; then
+      echo "🚫 排除 $((before - after)) 个含 '$EXCLUDE_PATTERN' 的历史残留 fork"
+      REGISTRY=$(echo "$REGISTRY" | jq -c --arg e "$EXCLUDE_PATTERN" \
+        '{updated_at: .updated_at, last_full_check_at: .last_full_check_at, full_check_interval_days: .full_check_interval_days,
+          syncable: [.syncable[] | select((.name // "" | ascii_downcase | contains($e | ascii_downcase)) | not)],
+          unsyncable: .unsyncable,
+          new: [.new[] | select((.name // "" | ascii_downcase | contains($e | ascii_downcase)) | not)],
+          retry_failed: .retry_failed, pending_batches: .pending_batches}')
+    fi
+  fi
   if [ -n "$ONLY_REPOS" ]; then
     # only_repos 快速模式: 只检测指定 fork (注册表里可能有也可能没有,没有就 enrich 补上)
     local want_json want
