@@ -281,7 +281,7 @@ if [ -f "$RUNNER_TEMP/events.jsonl" ] && [ -s "$RUNNER_TEMP/events.jsonl" ]; the
           (map(select(.action == "fork_complete")) | last | .result) as $complete_result
           | if $complete_result == "fail" then "fail"
             elif $complete_result == "skip" then "skip"
-            elif (any(.result == "fail" or .result == "error")) then "fail"
+            elif (map(select((.action | startswith("disable_workflow")) | not)) | any(.result == "fail" or .result == "error")) then "fail"
             elif $complete_result == "ok" then "complete"
             elif $complete_result != null then $complete_result
             else "partial"

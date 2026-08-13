@@ -187,7 +187,7 @@ workflow_kept_by_pattern() {
 disable_workflows_for_fork() {
   local fork_json="$1" fork_owner fork_name fork_full
   local workflows workflows_err workflows_api workflow
-  local total=0 disabled=0 dry_run=0 kept=0 already_disabled=0 failed=0
+  local total=0 disabled=0 dry_run=0 kept=0 already_disabled=0 failed=0 system_managed=0
 
   fork_owner=$(echo "$fork_json" | jq -r '.fork_owner // empty')
   fork_name=$(echo "$fork_json" | jq -r '.name // empty')
@@ -290,6 +290,14 @@ disable_workflows_for_fork() {
       echo "  ✅ 已禁用: $name ($path)"
       log_event "$fork_name" "disable_workflow" "ok" \
         workflow_id="$id" workflow_name="$name" workflow_path="$path" workflow_state="$state"
+    elif printf '%s' "$(api_error_message "$disable_err")" | grep -Eiq 'Unable to disable this workflow'; then
+      # GitHub 系统自动管理(如 pages-build-deployment)不可手动禁用,视作"系统保留",
+      # 不算失败,避免反复重探测并误报 drift 连续失败
+      system_managed=$((system_managed + 1))
+      echo "  🟪 系统保留(不可禁用): $name ($path)"
+      log_event "$fork_name" "disable_workflow" "skip" \
+        reason="system_managed" workflow_id="$id" workflow_name="$name" \
+        workflow_path="$path" workflow_state="$state"
     else
       failed=$((failed + 1))
       echo "  ❌ 禁用失败: $name ($path) - $(api_error_message "$disable_err")"
@@ -303,14 +311,14 @@ disable_workflows_for_fork() {
   if [ "$failed" -gt 0 ]; then
     log_event "$fork_name" "disable_workflows_complete" "fail" \
       total_workflows="$total" disabled_workflows="$disabled" dry_run_workflows="$dry_run" \
-      kept_workflows="$kept" already_disabled_workflows="$already_disabled" failed_workflows="$failed"
+      kept_workflows="$kept" already_disabled_workflows="$already_disabled" failed_workflows="$failed" system_managed_workflows="$system_managed"
   else
     log_event "$fork_name" "disable_workflows_complete" "ok" \
       total_workflows="$total" disabled_workflows="$disabled" dry_run_workflows="$dry_run" \
-      kept_workflows="$kept" already_disabled_workflows="$already_disabled" failed_workflows="0"
+      kept_workflows="$kept" already_disabled_workflows="$already_disabled" failed_workflows="0" system_managed_workflows="$system_managed"
   fi
 
-  echo "  📊 workflows: total=$total disabled=$disabled dry_run=$dry_run kept=$kept already_disabled=$already_disabled failed=$failed"
+  echo "  📊 workflows: total=$total disabled=$disabled dry_run=$dry_run kept=$kept already_disabled=$already_disabled system_managed=$system_managed failed=$failed"
 
   # 记录本次探测结果,供下次 TTL 缓存使用
   # all_disabled = 本次探测成功且没有 active workflow 残留 (failed=0 且 kept=0 或 kept 之外都处理完)
