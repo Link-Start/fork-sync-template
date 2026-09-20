@@ -1,518 +1,458 @@
 {
   "forks": {
-    "9router_decolua": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:17.021Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "AstrBot_AstrBotDevs": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:24.015Z",
+      "last_ts": "2026-09-20T05:30:24.522Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "CLIProxyAPI_router-for-me": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:23.429Z",
+      "last_ts": "2026-09-20T05:30:24.390Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "ChatLab_ChatLab": {
+    "CPA-Manager-Plus_seakee": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:18.688Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "Cli-Proxy-API-Management-Center_router-for-me": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:28.646Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "CloakBrowser_CloakHQ": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:33.256Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "CodePilot-op7418": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:37.656Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "Codex-App-Manager_Wangnov": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:38.431Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "CopilotForXcode": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:46.708Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "CyberStrikeAI_Ed1s0nZ": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:45.288Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": "2026-09-11T05:30:04Z"
-    },
-    "DEEIX-Chat_DEEIX-AI": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:48.320Z",
+      "last_ts": "2026-09-20T05:30:24.173Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "DarkGPT_Jawaz-Keyzor": {
       "last_result": "skip",
-      "last_ts": "2026-09-19T05:14:46.878Z",
+      "last_ts": "2026-09-20T05:30:19.313Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "DiscordAITranslator_ROOT94-MAX": {
+    "DouYin_Spider-cv-cat": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:58.290Z",
+      "last_ts": "2026-09-20T05:30:39.090Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "Douyin_Spider_ccv-cat": {
       "last_result": "skip",
-      "last_ts": "2026-09-19T05:14:55.162Z",
+      "last_ts": "2026-09-20T05:30:32.304Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "GUI.for.SingBox_GUI-for-Cores": {
+    "FreshRSS_FreshRSS": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:14:54.918Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "GenericAgent_lsdefine": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:07.765Z",
+      "last_ts": "2026-09-20T05:30:33.165Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "GitNexus-abhigyanpatwari": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:13.837Z",
+      "last_ts": "2026-09-20T05:30:37.185Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "IPTV_CCSH": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:07.860Z",
+      "last_ts": "2026-09-20T05:30:39.585Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "JdApis-cv-cat": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:30:51.814Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "KSword_KSwordDEV": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:08.850Z",
+      "last_ts": "2026-09-20T05:30:45.838Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "LDStatusPro_caigg188": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:30:46.718Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "LastChat_Cocolalilal": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:30:49.433Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "MonkeyCode-chaitin": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:22.602Z",
+      "last_ts": "2026-09-20T05:31:03.043Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "Motrix_agalwood": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:22.437Z",
+      "last_ts": "2026-09-20T05:31:03.524Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "OmniRoute_diegosouzapw": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:26.483Z",
+      "last_ts": "2026-09-20T05:31:18.938Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "OpenCowork_AIDotNet": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:24.328Z",
+      "last_ts": "2026-09-20T05:31:12.239Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "OpenSwarm-unohee": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:36.744Z",
+      "last_ts": "2026-09-20T05:31:16.443Z",
       "consecutive_failures": 0,
       "last_alert_ts": "2026-09-11T05:30:04Z"
     },
     "QtScrcpy_barry-ran": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:36.272Z",
+      "last_ts": "2026-09-20T05:31:17.329Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "QuantDinger-brokermr810": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:34.187Z",
+      "last_ts": "2026-09-20T05:31:20.769Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "WindsurfAPI_dwgx": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:40.434Z",
+      "last_ts": "2026-09-20T05:31:28.412Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "acme.sh-acmesh-official": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:31:29.213Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "all-api-hub_qixing-jk": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:52.848Z",
+      "last_ts": "2026-09-20T05:31:39.898Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "awesome-ChatGPT-repositories_taishi-i": {
+    "any-auto-register_zc-zhangchen": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:46.785Z",
+      "last_ts": "2026-09-20T05:31:32.779Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "bruno-usebruno": {
+    "bitbox-wallet-app_BitBoxSwiss": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:15:52.424Z",
+      "last_ts": "2026-09-20T05:31:37.527Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "caveman-JuliusBrussee": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:31:41.617Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "cc-haha_NanmiCoder": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:07.875Z",
+      "last_ts": "2026-09-20T05:31:44.673Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "cherry-studio-CherryHQ": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:17.096Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "chrome-devtools-mcp-ChromeDevTools": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:09.806Z",
+      "last_ts": "2026-09-20T05:32:08.666Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "clash-verge-rev_clash-verge-rev": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:07.908Z",
+      "last_ts": "2026-09-20T05:31:55.675Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "clashfree-free-nodes": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:17.984Z",
+      "last_ts": "2026-09-20T05:31:50.183Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "clawd-on-desk-rullerzhou-afk": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:22.255Z",
+      "last_ts": "2026-09-20T05:32:21.815Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "clawgod-0Chencc": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:32.137Z",
+      "last_ts": "2026-09-20T05:32:24.958Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "cockpit-tools_jlcodes99": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:31.651Z",
+      "last_ts": "2026-09-20T05:32:21.483Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "codex-register-fix_Maranv2732": {
+    "codex2api_james-6-23": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:29.152Z",
+      "last_ts": "2026-09-20T05:32:21.292Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "codex_openai": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:18.371Z",
+      "last_ts": "2026-09-20T05:33:16.670Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "codex_register_Hermylivid261": {
       "last_result": "skip",
-      "last_ts": "2026-09-19T05:16:37.680Z",
+      "last_ts": "2026-09-20T05:32:29.568Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "colleague-skill-titanwings": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:44.866Z",
+      "last_ts": "2026-09-20T05:32:32.980Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "cpa-usage-keeper_Willxup": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:47.801Z",
+      "last_ts": "2026-09-20T05:32:51.371Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "cursor-byok_leookun": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:32:41.236Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "deer-flow-bytedance": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:16:51.570Z",
+      "last_ts": "2026-09-20T05:32:45.208Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "desktop-cc-gui_zhukunpenglinyutong": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:32:53.914Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "discourse_discourse": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:07.313Z",
+      "last_ts": "2026-09-20T05:33:06.112Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "douyin_erma0": {
       "last_result": "skip",
-      "last_ts": "2026-09-19T05:17:24.390Z",
+      "last_ts": "2026-09-20T05:32:56.749Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "emdash-generalaction": {
+    "eino-ops-agent_Enterpr1se0": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:45.045Z",
+      "last_ts": "2026-09-20T05:33:04.124Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "forgecode_antinomyhq": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:37.446Z",
+      "last_ts": "2026-09-20T05:33:13.078Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "free-proxy-list_proxifly": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:27.853Z",
+      "last_ts": "2026-09-20T05:33:24.784Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "freeCodeCamp-freeCodeCamp": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:37.396Z",
+      "last_ts": "2026-09-20T05:33:27.260Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "freebuff2api-wokers_pingmike2": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:39.240Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "gallery_google-ai-edge": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:56.871Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "ghidra_NationalSecurityAgency": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:48.530Z",
+      "last_ts": "2026-09-20T05:33:26.291Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "ghostty-ghostty-org": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:53.485Z",
+      "last_ts": "2026-09-20T05:33:29.383Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "gpt2api_432539": {
       "last_result": "skip",
-      "last_ts": "2026-09-19T05:17:46.052Z",
+      "last_ts": "2026-09-20T05:33:25.621Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "grok-build_xai-org": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:33:33.102Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "grok-register-panel_lij768423-svg": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:00.210Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "grok-register_AaronL725": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:17:56.990Z",
+      "last_ts": "2026-09-20T05:33:38.106Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "hermes-agent-NousResearch": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:18.715Z",
+      "last_ts": "2026-09-20T05:33:51.973Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "huashu-design-alchaincyf": {
+    "icloud-api_mangobubu": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:14.926Z",
+      "last_ts": "2026-09-20T05:35:15.775Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "iptv-api_Guovin": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:11.124Z",
+      "last_ts": "2026-09-20T05:33:41.672Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "jshookmcp_vmoranv": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:33:46.228Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "kiro-manager_-huey1in": {
       "last_result": "skip",
-      "last_ts": "2026-09-19T05:18:27.833Z",
+      "last_ts": "2026-09-20T05:33:46.412Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "lanhu-mcp_boundarytaxidermist380": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:30.706Z",
+      "last_ts": "2026-09-20T05:33:50.848Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "lark-cli-arksuite": {
+    "llmfit-AlexsJones": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:35.587Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "lx-music-desktop_lyswhut": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:20:06.825Z",
+      "last_ts": "2026-09-20T05:34:13.191Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "mempalace-milla-jovovich": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:34.598Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "misskey_misskey-dev": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:42.949Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "netbird-netbirdio": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:48.545Z",
+      "last_ts": "2026-09-20T05:33:58.548Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "new-api-QuantumNous": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:53.198Z",
+      "last_ts": "2026-09-20T05:34:03.128Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "obs-studio_obsproject": {
+    "open-codesign_OpenCoworkAI": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:56.138Z",
+      "last_ts": "2026-09-20T05:34:22.578Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "ollama-ollama": {
+    "open-reverselab_LING71671": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:59.833Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "public-apis-public-apis": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:18:58.409Z",
+      "last_ts": "2026-09-20T05:34:22.669Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "radare2_radareorg": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:08.453Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "reg-factory_tiantianGPU": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:09.560Z",
+      "last_ts": "2026-09-20T05:34:26.744Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "register_MasterAlanLab": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:07.789Z",
+      "last_ts": "2026-09-20T05:34:21.812Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "remotion-remotion-dev": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:17.837Z",
+      "last_ts": "2026-09-20T05:34:38.336Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "rikkahub_rikkahub": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:20.494Z",
+      "last_ts": "2026-09-20T05:34:33.209Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "sam-image-app_SamuelYooo": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:34.861Z",
+      "last_ts": "2026-09-20T05:34:34.322Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "scriptcat_scriptscat": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:37.571Z",
+      "last_ts": "2026-09-20T05:34:38.959Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "shotcut_mltframework": {
+    "stylekit_AnxForever": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:33.773Z",
+      "last_ts": "2026-09-20T05:34:44.728Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "skills_mattpocock": {
+    "sub2api-Wei-Shaw": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:36.092Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "superpowers-obra": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:52.561Z",
+      "last_ts": "2026-09-20T05:34:50.834Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "superset-superset-sh": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:20:05.058Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "turb-gpt-free-register_myfanhua": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:45.725Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "ui-ux-pro-max-skill-nextlevelbuilder": {
-      "last_result": "complete",
-      "last_ts": "2026-09-19T05:19:53.040Z",
+      "last_ts": "2026-09-20T05:35:07.812Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "webcodex_yyjeqhc": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:20:00.815Z",
+      "last_ts": "2026-09-20T05:34:51.030Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "x64dbg_x64dbg": {
+      "last_result": "complete",
+      "last_ts": "2026-09-20T05:34:57.544Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "xbmc-xbmc": {
       "last_result": "complete",
-      "last_ts": "2026-09-19T05:20:07.379Z",
+      "last_ts": "2026-09-20T05:35:03.774Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "9router_decolua": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:17.021Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -588,15 +528,15 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "CPA-Manager-Plus_seakee": {
-      "last_result": "complete",
-      "last_ts": "2026-09-18T05:21:10.929Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "Captcha_Gregwar": {
       "last_result": "complete",
       "last_ts": "2026-08-28T12:20:03.315Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "ChatLab_ChatLab": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:18.688Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -618,6 +558,18 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "Cli-Proxy-API-Management-Center_router-for-me": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:28.646Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "CloakBrowser_CloakHQ": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:33.256Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "CloudflareSpeedTest_XIU2": {
       "last_result": "complete",
       "last_ts": "2026-09-16T05:24:23.348Z",
@@ -627,6 +579,18 @@
     "Coday_HyperClockUp": {
       "last_result": "complete",
       "last_ts": "2026-08-30T05:59:35.552Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "CodePilot-op7418": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:37.656Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "Codex-App-Manager_Wangnov": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:38.431Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -654,9 +618,27 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "CopilotForXcode": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:46.708Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "CyberSilenter_LING71671": {
       "last_result": "skip",
       "last_ts": "2026-09-04T05:11:45.036Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "CyberStrikeAI_Ed1s0nZ": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:45.288Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": "2026-09-11T05:30:04Z"
+    },
+    "DEEIX-Chat_DEEIX-AI": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:14:48.320Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -666,9 +648,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "DouYin_Spider-cv-cat": {
+    "DiscordAITranslator_ROOT94-MAX": {
       "last_result": "complete",
-      "last_ts": "2026-09-14T05:32:40.073Z",
+      "last_ts": "2026-09-19T05:14:58.290Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -696,9 +678,15 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "FreshRSS_FreshRSS": {
+    "GUI.for.SingBox_GUI-for-Cores": {
       "last_result": "complete",
-      "last_ts": "2026-09-15T05:32:07.506Z",
+      "last_ts": "2026-09-19T05:14:54.918Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "GenericAgent_lsdefine": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:15:07.765Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -726,12 +714,6 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "JdApis-cv-cat": {
-      "last_result": "complete",
-      "last_ts": "2026-08-19T02:11:26.774Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "KeiOS_hosizoraru": {
       "last_result": "complete",
       "last_ts": "2026-09-16T05:24:42.682Z",
@@ -756,21 +738,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "LDStatusPro_caigg188": {
-      "last_result": "complete",
-      "last_ts": "2026-09-10T05:24:59.760Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "LLMs-from-scratch-rasbt": {
       "last_result": "complete",
       "last_ts": "2026-09-18T05:21:37.868Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "LastChat_Cocolalilal": {
-      "last_result": "complete",
-      "last_ts": "2026-08-31T06:20:46.355Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -960,12 +930,6 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "acme.sh-acmesh-official": {
-      "last_result": "complete",
-      "last_ts": "2026-09-05T05:01:42.208Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "agency-agents-msitarzewski": {
       "last_result": "complete",
       "last_ts": "2026-09-13T05:28:51.938Z",
@@ -1014,12 +978,6 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "any-auto-register_zc-zhangchen": {
-      "last_result": "complete",
-      "last_ts": "2026-09-02T05:12:58.386Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "anyrouter-check-in_KimYx0207": {
       "last_result": "complete",
       "last_ts": "2026-09-15T05:33:19.224Z",
@@ -1044,9 +1002,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "bitbox-wallet-app_BitBoxSwiss": {
+    "awesome-ChatGPT-repositories_taishi-i": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:22:21.934Z",
+      "last_ts": "2026-09-19T05:15:46.785Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1056,15 +1014,15 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "captcha_mewebstudio": {
+    "bruno-usebruno": {
       "last_result": "complete",
-      "last_ts": "2026-08-29T07:31:23.157Z",
+      "last_ts": "2026-09-19T05:15:52.424Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "caveman-JuliusBrussee": {
+    "captcha_mewebstudio": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:22:28.612Z",
+      "last_ts": "2026-08-29T07:31:23.157Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1089,6 +1047,12 @@
     "chinese-novelist-skill-PenglongHuang": {
       "last_result": "complete",
       "last_ts": "2026-09-07T05:23:08.604Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "chrome-devtools-mcp-ChromeDevTools": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:16:09.806Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1128,15 +1092,15 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "codex-windows-fast-patch-skill_chen0416ccc-cpu": {
+    "codex-register-fix_Maranv2732": {
       "last_result": "complete",
-      "last_ts": "2026-09-16T05:26:14.128Z",
+      "last_ts": "2026-09-19T05:16:29.152Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "codex2api_james-6-23": {
+    "codex-windows-fast-patch-skill_chen0416ccc-cpu": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:23:22.981Z",
+      "last_ts": "2026-09-16T05:26:14.128Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1164,21 +1128,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "cursor-byok_leookun": {
-      "last_result": "complete",
-      "last_ts": "2026-09-16T05:26:41.375Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "cutter_rizinorg": {
       "last_result": "complete",
       "last_ts": "2026-09-12T05:15:21.699Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "desktop-cc-gui_zhukunpenglinyutong": {
-      "last_result": "complete",
-      "last_ts": "2026-09-18T05:23:47.202Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1188,9 +1140,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "eino-ops-agent_Enterpr1se0": {
+    "emdash-generalaction": {
       "last_result": "complete",
-      "last_ts": "2026-09-13T05:30:26.386Z",
+      "last_ts": "2026-09-19T05:17:45.045Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1230,6 +1182,12 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "gallery_google-ai-edge": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:17:56.871Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "gemini-web2api_Sophomoresty": {
       "last_result": "complete",
       "last_ts": "2026-08-15T02:10:05.821Z",
@@ -1239,6 +1197,12 @@
     "ghidra-rpc_cellebrite-labs": {
       "last_result": "complete",
       "last_ts": "2026-09-18T05:24:33.124Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "ghidra_NationalSecurityAgency": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:17:48.530Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1272,9 +1236,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "grok-build_xai-org": {
+    "grok-register_AaronL725": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:24:41.112Z",
+      "last_ts": "2026-09-19T05:17:56.990Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1332,9 +1296,9 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "icloud-api_mangobubu": {
+    "huashu-design-alchaincyf": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:26:48.147Z",
+      "last_ts": "2026-09-19T05:18:14.926Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1374,12 +1338,6 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "jshookmcp_vmoranv": {
-      "last_result": "complete",
-      "last_ts": "2026-09-08T05:29:31.420Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "khazix-skills_KKKKhazix": {
       "last_result": "complete",
       "last_ts": "2026-09-16T05:28:02.618Z",
@@ -1398,15 +1356,21 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "llmfit-AlexsJones": {
+    "lark-cli-arksuite": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:25:14.035Z",
+      "last_ts": "2026-09-19T05:18:35.587Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "lsw_LING71671": {
       "last_result": "skip",
       "last_ts": "2026-09-04T05:16:13.988Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "lx-music-desktop_lyswhut": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:20:06.825Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1422,9 +1386,21 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "misskey_misskey-dev": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:18:42.949Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "moemail_beilunyang": {
       "last_result": "complete",
       "last_ts": "2026-08-30T06:03:14.518Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "netbird-netbirdio": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:18:48.545Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1440,27 +1416,27 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "obs-studio_obsproject": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:18:56.138Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "oh-my-codex-Yeachan-Heo": {
       "last_result": "complete",
       "last_ts": "2026-09-12T05:17:52.065Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "open-codesign_OpenCoworkAI": {
+    "ollama-ollama": {
       "last_result": "complete",
-      "last_ts": "2026-09-18T05:25:28.563Z",
+      "last_ts": "2026-09-19T05:18:59.833Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
     "open-grokbot_LING71671": {
       "last_result": "skip",
       "last_ts": "2026-09-04T05:16:48.584Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "open-reverselab_LING71671": {
-      "last_result": "complete",
-      "last_ts": "2026-09-16T05:28:45.254Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1486,7 +1462,7 @@
       "last_result": "fail",
       "last_ts": "2026-09-11T05:29:33.753Z",
       "consecutive_failures": 3,
-      "last_alert_ts": "2026-09-19T05:20:10Z"
+      "last_alert_ts": "2026-09-20T05:35:17Z"
     },
     "ponytail_DietrichGebert": {
       "last_result": "complete",
@@ -1497,6 +1473,18 @@
     "pua-tanweai": {
       "last_result": "complete",
       "last_ts": "2026-09-10T05:29:43.626Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "public-apis-public-apis": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:18:58.409Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "reg-factory_tiantianGPU": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:19:09.560Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1518,6 +1506,12 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "shotcut_mltframework": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:19:33.773Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "siyuan-siyuan-note": {
       "last_result": "complete",
       "last_ts": "2026-09-18T05:26:10.111Z",
@@ -1536,27 +1530,27 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
+    "skills_mattpocock": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:19:36.092Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
     "spider-king-skill_aoyunyang": {
       "last_result": "complete",
       "last_ts": "2026-09-03T05:21:20.526Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "stylekit_AnxForever": {
-      "last_result": "complete",
-      "last_ts": "2026-09-18T05:26:11.280Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
-    "sub2api-Wei-Shaw": {
-      "last_result": "complete",
-      "last_ts": "2026-09-18T05:26:25.012Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "sublinkPro_ZeroDeng01": {
       "last_result": "complete",
       "last_ts": "2026-09-11T05:28:23.700Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "superpowers-obra": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:19:52.561Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1569,6 +1563,18 @@
     "tg-signer_amchii": {
       "last_result": "complete",
       "last_ts": "2026-09-02T05:17:47.639Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "turb-gpt-free-register_myfanhua": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:19:45.725Z",
+      "consecutive_failures": 0,
+      "last_alert_ts": null
+    },
+    "ui-ux-pro-max-skill-nextlevelbuilder": {
+      "last_result": "complete",
+      "last_ts": "2026-09-19T05:19:53.040Z",
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
@@ -1590,12 +1596,6 @@
       "consecutive_failures": 0,
       "last_alert_ts": null
     },
-    "x64dbg_x64dbg": {
-      "last_result": "complete",
-      "last_ts": "2026-09-15T05:37:43.212Z",
-      "consecutive_failures": 0,
-      "last_alert_ts": null
-    },
     "yichen-skills_mcncarl": {
       "last_result": "complete",
       "last_ts": "2026-09-18T05:26:38.112Z",
@@ -1603,5 +1603,5 @@
       "last_alert_ts": null
     }
   },
-  "updated_at": "2026-09-19T05:20:09Z"
+  "updated_at": "2026-09-20T05:35:17Z"
 }
